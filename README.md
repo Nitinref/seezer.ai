@@ -1,245 +1,174 @@
-🚀 Seezer.ai
+# Seezer.ai
 
-AI-Powered Website Builder that generates production-ready React apps from plain English.
+> **AI-powered website builder** — describe what you want, get a production-ready React app.
 
-Seezer.ai is a full-stack AI system that converts text prompts into fully functional web applications using a multi-agent architecture, sandbox execution, and real-time orchestration.
+Seezer.ai converts plain English prompts into fully functional, build-verified React applications using a multi-agent pipeline, isolated sandbox execution, and real-time streaming.
 
-✨ What It Does
+---
 
-🧠 Converts text prompts into complete React applications
+## What It Does
 
-🛠 Uses multi-agent architecture (Planner → Builder → Validator → Checker)
+Type a prompt like *"Build a SaaS landing page with a hero section, pricing cards, and CTA"* — Seezer.ai plans, builds, validates, and verifies a complete React project, ready to deploy.
 
-🏗 Executes code safely inside isolated E2B sandboxes
+- Generates complete React applications from natural language
+- Runs code safely inside isolated E2B sandboxes
+- Streams live build logs via WebSockets
+- Verifies production builds automatically before marking them ready
+- Persists project state and chat history across sessions
 
-⚡ Streams real-time logs using WebSockets
+---
 
-🔄 Orchestrates jobs using Redis workers
+## Architecture
 
-🗂 Stores project state & chat history using PostgreSQL + Prisma
-
-🔐 JWT-based authentication
-
-📦 Fully automated build verification pipeline
-
-🏛 Architecture Overview
+```
 User Prompt
-     ↓
+     │
+     ▼
 API Server (Express)
-     ↓
+     │
+     ▼
 Redis Queue
-     ↓
+     │
+     ▼
 Worker Process
-     ↓
+     │
+     ▼
 Agent Pipeline
-  ├── PlannerAgent
-  ├── BuilderAgent
-  ├── CodeValidatorAgent
-  └── AppCheckerAgent
-     ↓
-E2B Sandbox (Isolated Code Execution)
-     ↓
-WebSocket Live Logs
-     ↓
-Database Persistence (Postgres)
-🧠 Multi-Agent System
+  ├── PlannerAgent       — Analyzes context, generates structured build plan
+  ├── BuilderAgent       — Creates/modifies React components and routing
+  ├── CodeValidatorAgent — Fixes imports, syntax errors, dependencies
+  └── AppCheckerAgent    — Runs npm build + lint, fixes compilation errors
+     │
+     ▼
+E2B Sandbox (isolated execution)
+     │
+     ▼
+WebSocket Live Logs  →  Database (PostgreSQL)
+```
 
-Seezer.ai uses structured AI orchestration:
+---
 
-1️⃣ PlannerAgent
+## Multi-Agent Pipeline
 
-Analyzes existing project
+| Agent | Responsibility |
+|---|---|
+| **PlannerAgent** | Reads existing project files, generates a structured build plan, decides which files to create or modify |
+| **BuilderAgent** | Writes React components, manages routing, uses sandbox tools for file operations |
+| **CodeValidatorAgent** | Detects broken imports, fixes syntax errors, ensures dependency correctness |
+| **AppCheckerAgent** | Runs `npm run build`, fixes compilation errors, executes linting, confirms production readiness |
 
-Generates structured build plan
+Each agent operates with tool-based AI reasoning — not just text generation.
 
-Decides file modifications
+---
 
-2️⃣ BuilderAgent
+## Tech Stack
 
-Creates/modifies React components
+**Backend:** Node.js, Express, Redis, PostgreSQL, Prisma ORM, JWT Auth
 
-Manages routing
+**AI & Execution:** OpenAI Agent SDK, E2B Sandbox, structured prompt engineering
 
-Uses sandbox tools for file operations
+**Real-Time:** WebSockets for live build log streaming
 
-3️⃣ CodeValidatorAgent
+---
 
-Detects import issues
+## Getting Started
 
-Fixes syntax errors
+### Prerequisites
 
-Ensures dependency correctness
+- Node.js + pnpm
+- Docker (for PostgreSQL and Redis)
+- OpenAI API key
+- E2B API key
 
-4️⃣ AppCheckerAgent
+### 1. Clone
 
-Runs npm run build
-
-Fixes compilation errors
-
-Executes linting
-
-Ensures production readiness
-
-🛠 Tech Stack
-Backend
-
-Node.js
-
-Express
-
-Redis (job orchestration)
-
-Prisma ORM
-
-PostgreSQL
-
-JWT Authentication
-
-AI & Execution
-
-OpenAI Agent SDK
-
-E2B Sandbox (isolated code execution)
-
-Tool-based AI workflow
-
-Structured prompt engineering
-
-Real-Time
-
-WebSockets for live build logs
-
-Streaming execution updates
-
-🔥 Key Features
-
-🧱 Incremental project updates (reads existing files before modifying)
-
-📁 Smart file creation with context awareness
-
-🚫 Prevents redundant package installation
-
-🧪 Automated build + lint verification
-
-💾 Persistent memory using project context storage
-
-⚙️ Production-ready output
-
-🚀 Getting Started
-1️⃣ Clone the repo
+```bash
 git clone https://github.com/yourusername/seezer-ai.git
 cd seezer-ai
-2️⃣ Install dependencies
+```
+
+### 2. Install dependencies
+
+```bash
 pnpm install
-3️⃣ Setup Environment Variables
+```
 
-Create .env:
+### 3. Configure environment
 
+Create a `.env` file:
+
+```env
 DATABASE_URL=postgresql://postgres:password@localhost:5432/postgres
 REDIS_URL=redis://localhost:6379
 JWT_SECRET=your_secret
 OPENAI_API_KEY=your_openai_key
 E2B_API_KEY=your_e2b_key
 E2B_TEMPLATE_ID=code-interpreter-v1
-4️⃣ Start Infrastructure
+```
 
-PostgreSQL:
+### 4. Start infrastructure
 
+```bash
+# PostgreSQL
 docker run -p 5432:5432 -e POSTGRES_PASSWORD=password postgres
 
-Redis:
-
+# Redis
 docker run -p 6379:6379 redis
-5️⃣ Run Backend
+```
+
+### 5. Run
+
+```bash
 pnpm dev
-📡 Real-Time Build Flow
+```
 
-When a user submits a prompt:
+---
 
-Job is pushed to Redis
+## How a Build Works
 
-Worker consumes job
+1. User submits a prompt via the API
+2. Job is pushed to Redis and picked up by a worker
+3. Agent pipeline executes inside an E2B sandbox
+4. Build logs stream to the client via WebSocket in real time
+5. Final build is verified — project marked ready and state saved to PostgreSQL
 
-Agents execute inside E2B sandbox
+---
 
-Logs stream via WebSocket
+## Key Design Decisions
 
-Database stores project state
+**Incremental updates** — agents read existing project files before making changes, preserving context across edits.
 
-Final URL becomes available
+**Sandboxed execution** — all code runs inside E2B, never on the host.
 
-📦 Example Prompt
-Build a SaaS landing page with hero section, pricing cards, and CTA.
+**Automated build verification** — `AppCheckerAgent` runs `npm run build` and lint on every generation. Projects are only marked ready when the build passes.
 
-Output:
+**Redundancy prevention** — the pipeline detects and skips unnecessary package installs.
 
-Fully structured React project
+**Persistent memory** — project context is stored between sessions so follow-up prompts build on prior work.
 
-Tailwind styling
+---
 
-Production build verified
+## Security
 
-Ready to deploy
+- All code execution is sandboxed via E2B — no arbitrary host access
+- JWT-based authentication on all endpoints
+- Tool invocations are controlled and scoped
+- Build verification runs before any project is marked deployable
 
-🔒 Security
+---
 
-Sandboxed execution (E2B)
+## Roadmap
 
-No arbitrary host execution
+- [ ] Versioned project snapshots
+- [ ] One-click deployment (Vercel / Netlify integration)
+- [ ] Persistent vector memory for long-term context
+- [ ] Prompt template library
+- [ ] Rate limiting and billing system
 
-JWT-based authentication
+---
 
-Controlled tool invocation
+## Author
 
-Build verification before marking ready
+**Nitin Yadav** — B.Tech CSE, Backend & AI Systems Engineer
 
-🧪 Why This Project Is Advanced
-
-Seezer.ai is not a simple AI wrapper.
-
-It demonstrates:
-
-Distributed job processing
-
-Multi-agent orchestration
-
-Tool-based AI reasoning
-
-Secure sandbox execution
-
-Production build automation
-
-Real-time streaming architecture
-
-This is infrastructure-level AI engineering.
-
-🎯 Future Improvements
-
-Versioned project snapshots
-
-Deployment integration (Vercel/Netlify)
-
-Persistent vector memory
-
-Template optimization
-
-Rate limiting + billing system
-
-👨‍💻 Author
-
-Built by Nitin Yadav
-B.Tech CSE | Backend & AI Systems Engineer
-
-If you want, I can now:
-
-Make it even more “startup-grade”
-
-Add a proper architecture diagram section
-
-Add badges + metrics style
-
-Make a shorter resume-optimized version
-
-Or create a landing page description for seezer.ai
-
-This project is actually strong. Don’t undersell it.
+Built with a focus on real infrastructure: distributed job processing, multi-agent orchestration, secure sandbox execution, and production build automation.
