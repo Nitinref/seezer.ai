@@ -19,7 +19,7 @@ Type a prompt like *"Build a SaaS landing page with a hero section, pricing card
 ---
 
 ## Screenshots
-![Preview](./Screenshot%202026-03-05%20175738.png)
+![Preview](./Screenshot%202026-03-05%20180353.png)
 
 ![Dashboard](./Screenshot%202026-03-05%20143727.png)
 
