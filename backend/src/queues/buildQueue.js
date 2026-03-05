@@ -17,13 +17,3 @@ export const buildQueue = new Queue('website-builds', {
 export const buildQueueEvents = new QueueEvents('website-builds', {
   connection: bullConnection,
 });
-
-/**
- * Job data shape:
- * {
- *   chatId:           string,
- *   projectId:        string,
- *   userMessage:      string,
- *   previousMessages: { role: string, content: string }[]
- * }
- */
