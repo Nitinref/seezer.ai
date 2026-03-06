@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
-import { ChevronRight, Plus, Paperclip, Settings, ArrowUp, FolderOpen, Zap, Eye, Brain, FileCode, RefreshCw, Menu, X } from "lucide-react"; // Added Menu, X
+import { ChevronRight, Plus, Paperclip, Settings, ArrowUp, FolderOpen, Zap, Eye, Brain, FileCode, RefreshCw, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Spotlight } from "@/components/ui/spotlight";
 import { WobbleCard } from "@/components/ui/wobble-card";
@@ -57,7 +57,7 @@ function HeroInput() {
   const canGo = !!msg.trim();
 
   return (
-    <div className="w-full max-w-2xl mx-auto px-4"> {/* Added px-4 for mobile */}
+    <div className="w-full max-w-2xl mx-auto px-4 sm:px-0">
 
       {/* Input box */}
       <div className="relative rounded-sm p-[1.5px] bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500">
@@ -70,45 +70,45 @@ function HeroInput() {
             rows={3}
             className="w-full bg-transparent border-none outline-none px-4 sm:px-5 pt-5 pb-2 text-white font-mono text-[14px] leading-relaxed resize-none placeholder:text-white/30 focus:outline-none"
           />
-          <div className="flex flex-wrap items-center gap-2 px-3 sm:px-4 pb-4 pt-1 border-t border-white/10">
-            <button className="w-8 h-8 rounded-sm border border-white/20 flex items-center justify-center text-white/50 hover:text-white hover:border-white/40 transition-colors bg-transparent">
-              <Plus size={15} />
+          <div className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 pb-4 pt-1 border-t border-white/10 overflow-x-auto">
+            <button className="w-7 h-7 sm:w-8 sm:h-8 rounded-sm border border-white/20 flex items-center justify-center text-white/50 hover:text-white hover:border-white/40 transition-colors bg-transparent flex-shrink-0">
+              <Plus size={14} />
             </button>
-            <button className="w-8 h-8 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors bg-transparent border-none">
-              <Paperclip size={14} />
+            <button className="w-7 h-7 sm:w-8 sm:h-8 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors bg-transparent border-none flex-shrink-0">
+              <Paperclip size={13} />
             </button>
-            <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-sm border border-white/20 bg-transparent text-white/70 font-mono text-[10px] sm:text-[11px] cursor-pointer hover:border-white/40 hover:text-white transition-all select-none tracking-wide">
-              Models <ChevronRight size={11} className="opacity-70" />
+            <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-sm border border-white/20 bg-transparent text-white/70 font-mono text-[10px] sm:text-[11px] cursor-pointer hover:border-white/40 hover:text-white transition-all select-none tracking-wide flex-shrink-0">
+              Select Models <ChevronRight size={10} className="opacity-70" />
             </div>
-            <div className="flex-1" />
-            <button className="w-8 h-8 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors bg-transparent border-none">
-              <Settings size={14} />
+            <div className="flex-1 min-w-[8px]" />
+            <button className="w-7 h-7 sm:w-8 sm:h-8 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors bg-transparent border-none flex-shrink-0">
+              <Settings size={13} />
             </button>
             <button
               onClick={handleGo}
               className={cn(
-                "w-9 h-9 rounded-sm flex items-center justify-center transition-all duration-150 border",
+                "w-8 h-8 sm:w-9 sm:h-9 rounded-sm flex items-center justify-center transition-all duration-150 border flex-shrink-0",
                 canGo
                   ? "bg-white text-black cursor-pointer hover:bg-white/90 hover:scale-105 active:scale-95 border-white"
                   : "bg-transparent text-white/30 border-white/20 cursor-default"
               )}
             >
-              <ArrowUp size={16} />
+              <ArrowUp size={15} />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Banner - mobile optimized */}
+      {/* Banner */}
       {showBanner && (
-        <div className="mt-4 px-3 sm:px-4 py-3 rounded-sm border border-white/20 bg-[#0a0a0a] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="mt-4 px-3 sm:px-4 py-3 rounded-sm border border-white/20 bg-[#0a0a0a] flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <span className="px-2 py-0.5 rounded-sm bg-white text-black font-mono text-[10px] font-bold tracking-widest uppercase shrink-0">NEW</span>
             <span className="font-mono text-[11px] sm:text-[12px] text-white/60 truncate">Advanced AI on Browser, CLI, Phone...</span>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <div className="flex items-center gap-2 ml-auto sm:ml-0">
             <button onClick={() => setShowBanner(false)} className="font-mono text-[10px] sm:text-[11px] text-white/40 hover:text-white/70 transition-colors bg-transparent border-none cursor-pointer px-2">Close</button>
-            <Link href="/signup" className="px-3 py-1.5 rounded-sm bg-white text-black font-mono text-[10px] sm:text-[11px] font-bold tracking-wide hover:bg-white/90 transition-colors no-underline whitespace-nowrap">Explore</Link>
+            <Link href="/signup" className="px-2 sm:px-3 py-1.5 rounded-sm bg-white text-black font-mono text-[10px] sm:text-[11px] font-bold tracking-wide hover:bg-white/90 transition-colors no-underline whitespace-nowrap">Explore</Link>
           </div>
         </div>
       )}
@@ -116,10 +116,10 @@ function HeroInput() {
       {/* Bottom text */}
       <p className="text-center font-mono text-[10px] sm:text-[11px] text-white/30 mt-4 px-4">
         Get access to the best AI Agent. +30M users choose WEB BUILDER.{" "}
-        <Link href="/signup" className="text-white/60 hover:text-white transition-colors no-underline underline underline-offset-2">Upgrade plan</Link>
+        <Link href="/signup" className="text-white/60 hover:text-white transition-colors no-underline underline underline-offset-2 whitespace-nowrap">Upgrade plan</Link>
       </p>
 
-      {/* CTA buttons - stacked on mobile */}
+      {/* CTA buttons */}
       <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 px-4">
         <Link
           href="/signup"
@@ -162,8 +162,13 @@ export default function LandingPage() {
     return () => window.removeEventListener("scroll", fn);
   }, []);
 
+  // Close mobile menu when route changes
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [router]);
+
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-mono overflow-x-hidden"> {/* Added overflow-x-hidden */}
+    <div className="min-h-screen bg-[#0a0a0a] text-white font-mono overflow-x-hidden">
 
       {/* Corner brackets - hidden on mobile */}
       <span className="hidden sm:block pointer-events-none fixed top-0 left-0 z-[60] w-3 h-3 border-t-2 border-l-2 border-white/20" />
@@ -171,15 +176,15 @@ export default function LandingPage() {
       <span className="hidden sm:block pointer-events-none fixed bottom-0 left-0 z-[60] w-3 h-3 border-b-2 border-l-2 border-white/20" />
       <span className="hidden sm:block pointer-events-none fixed bottom-0 right-0 z-[60] w-3 h-3 border-b-2 border-r-2 border-white/20" />
 
-      {/* MOBILE-OPTIMIZED NAV */}
+      {/* NAV - Mobile responsive */}
       <nav className={cn(
-        "fixed top-0 left-0 right-0 z-50 h-16 flex items-center justify-between px-4 sm:px-8 md:px-16 transition-all duration-500", // Responsive padding
+        "fixed top-0 left-0 right-0 z-50 h-16 flex items-center justify-between px-4 sm:px-8 md:px-16 transition-all duration-500",
         scrolled ? "bg-black/80 backdrop-blur-xl border-b border-white/10 shadow-[0_4px_30px_rgba(0,0,0,0.3)]" : "bg-transparent border-b border-transparent"
       )}>
         <span className="font-bold text-[12px] sm:text-[14px] tracking-[0.25em] uppercase text-white">SEEZER.AI</span>
-
-        {/* Desktop menu - hidden on mobile */}
-        <div className="hidden md:flex items-center gap-10">
+        
+        {/* Desktop Navigation */}
+        <div className="hidden md:flex items-center gap-6 lg:gap-10">
           {["Pricing", "Product", "Docs"].map(l => (
             <a key={l} href="#" className="relative text-white/50 text-[13px] tracking-wide transition-colors duration-300 hover:text-white group">
               {l}
@@ -194,14 +199,14 @@ export default function LandingPage() {
           )}
         </div>
 
-        {/* Desktop auth buttons - hidden on mobile */}
+        {/* Desktop Auth Buttons */}
         <div className="hidden md:flex items-center gap-3">
           {token ? (
             <>
-              <div className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.05] text-[12px] text-white/50 backdrop-blur-md">
+              <div className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.05] text-[12px] text-white/50 backdrop-blur-md truncate max-w-[150px]">
                 {user?.email}<span className="text-white/70"> · 0 tokens</span>
               </div>
-              <Link href="/dashboard" className="px-5 py-2 rounded-md bg-white text-black text-[13px] font-semibold hover:bg-white/90 transition-all no-underline">Dashboard</Link>
+              <Link href="/dashboard" className="px-5 py-2 rounded-md bg-white text-black text-[13px] font-semibold hover:bg-white/90 transition-all no-underline whitespace-nowrap">Dashboard</Link>
             </>
           ) : (
             <>
@@ -211,36 +216,52 @@ export default function LandingPage() {
           )}
         </div>
 
-        {/* Mobile menu button */}
-        <button
+        {/* Mobile Menu Button */}
+        <button 
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="md:hidden w-8 h-8 rounded-sm border border-white/20 flex items-center justify-center text-white/70"
+          className="md:hidden p-2 rounded-sm border border-white/20 text-white/70 hover:text-white hover:border-white/40 transition-all"
         >
-          {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+          {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
-      </nav>
 
-      {/* Mobile menu dropdown */}
-      {mobileMenuOpen && (
-        <div className="fixed top-16 left-0 right-0 z-40 bg-[#0f0f0f] border-b border-white/10 p-4 md:hidden">
-          <div className="flex flex-col gap-4">
-            {["Pricing", "Product", "Docs"].map(l => (
-              <a key={l} href="#" className="text-white/70 text-[13px] tracking-wide py-2 border-b border-white/5">{l}</a>
-            ))}
-            {token ? (
-              <>
-                <div className="text-white/50 text-[12px] py-2 border-b border-white/5">{user?.email} · 0 tokens</div>
-                <Link href="/dashboard" className="text-white/70 text-[13px] tracking-wide py-2">Dashboard</Link>
-              </>
-            ) : (
-              <div className="flex flex-col gap-2 pt-2">
-                <Link href="/login" className="px-4 py-3 rounded-sm border border-white/20 text-white/70 text-[13px] text-center">Sign In</Link>
-                <Link href="/signup" className="px-4 py-3 rounded-sm bg-white text-black text-[13px] font-semibold text-center">Get Started</Link>
-              </div>
-            )}
+        {/* Mobile Menu Dropdown */}
+        {mobileMenuOpen && (
+          <div className="absolute top-16 left-0 right-0 bg-black/95 backdrop-blur-xl border-b border-white/10 py-4 px-4 md:hidden animate-in slide-in-from-top duration-300">
+            <div className="flex flex-col space-y-4">
+              {["Pricing", "Product", "Docs"].map(l => (
+                <a key={l} href="#" className="text-white/70 hover:text-white text-[14px] tracking-wide py-2 transition-colors">
+                  {l}
+                </a>
+              ))}
+              {token && (
+                <Link href="/dashboard" className="flex items-center gap-2 text-white/70 hover:text-white text-[14px] tracking-wide py-2 transition-colors">
+                  <FolderOpen size={16} /> My Projects
+                </Link>
+              )}
+              <div className="border-t border-white/10 my-2" />
+              {token ? (
+                <>
+                  <div className="text-white/50 text-[12px] py-2 truncate">
+                    {user?.email} · 0 tokens
+                  </div>
+                  <Link href="/dashboard" className="w-full px-4 py-2.5 rounded-md bg-white text-black text-[13px] font-semibold hover:bg-white/90 transition-all text-center">
+                    Dashboard
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link href="/login" className="w-full px-4 py-2.5 rounded-md border border-white/20 text-white/70 text-[13px] hover:text-white hover:border-white/30 transition-all text-center">
+                    Sign In
+                  </Link>
+                  <Link href="/signup" className="w-full px-4 py-2.5 rounded-md bg-white text-black text-[13px] font-semibold hover:bg-white/90 transition-all text-center">
+                    Get Started
+                  </Link>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </nav>
 
       {/* HERO */}
       <section className="min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-20 pb-16 text-center relative">
@@ -248,20 +269,20 @@ export default function LandingPage() {
         <div className="absolute inset-0 z-[1] bg-gradient-to-b from-[#0a0a0a]/40 via-transparent to-[#0a0a0a] pointer-events-none" />
 
         {/* Badge */}
-        <div className="relative z-10 flex justify-center mb-6 animate-in fade-in slide-in-from-bottom-3 duration-500">
+        <div className="relative z-10 flex justify-center mb-6 animate-in fade-in slide-in-from-bottom-3 duration-500 px-4">
           <button
             onClick={() => router.push(token ? "/dashboard" : "/signup")}
-            className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-sm border border-white/10 bg-white/[0.04] font-mono text-[10px] sm:text-[11px] text-white/50 hover:bg-white/[0.07] hover:text-white/75 transition-all cursor-pointer tracking-wide"
+            className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-sm border border-white/10 bg-white/[0.04] font-mono text-[10px] sm:text-[11px] text-white/50 hover:bg-white/[0.07] hover:text-white/75 transition-all cursor-pointer tracking-wide whitespace-nowrap"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-white/70 inline-block animate-pulse" />
             New — Try AI Agents
-            <ChevronRight size={11} className="opacity-50" />
+            <ChevronRight size={12} className="opacity-50" />
           </button>
         </div>
 
         {/* Title */}
-        <div className="relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100">
-          <h1 className="font-black text-white leading-none tracking-[-0.04em] uppercase mb-6 px-4" style={{ fontSize: "clamp(32px,10vw,80px)" }}>
+        <div className="relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100 px-4">
+          <h1 className="font-black text-white leading-none tracking-[-0.04em] uppercase mb-6" style={{ fontSize: "clamp(32px,7vw,80px)" }}>
             Launch your website
             <br />
             <span className="text-white/40">in hours, not days</span>
@@ -278,21 +299,127 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Rest of the sections - add responsive padding */}
-      <section className="py-16 sm:py-32 px-4 sm:px-6 md:px-12 border-t border-white/[0.06] overflow-hidden">
-        {/* ... features section (same content, just responsive padding) ... */}
+      {/* FEATURES */}
+      <section className="py-20 sm:py-32 px-4 sm:px-6 md:px-12 border-t border-white/[0.06] overflow-hidden">
+        <div className="max-w-6xl mx-auto">
+          <Reveal className="text-center mb-16 sm:mb-24 px-4">
+            <h2 className="font-black text-3xl sm:text-4xl md:text-5xl tracking-tight mb-4 uppercase">Everything in one place</h2>
+            <p className="text-white/35 text-[13px] sm:text-[14px] max-w-xl mx-auto">Build, preview, and iterate — all from a single chat interface.</p>
+          </Reveal>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 px-2 sm:px-0">
+            {FEATURES.map((f, i) => {
+              const Icon = f.icon;
+              return (
+                <Reveal key={f.title} delay={i * 80} className={f.span}>
+                  <NoiseBackground
+                    containerClassName={cn("h-full min-h-[200px] sm:min-h-[220px] !rounded-sm", "![background:_#0d0d0d] dark:![background:_#0d0d0d]")}
+                    className="h-full p-5 sm:p-6 flex flex-col justify-between min-h-[180px] sm:min-h-[196px]"
+                    gradientColors={f.gradientColors}
+                    noiseIntensity={0.18}
+                    speed={0.08}
+                    animating={true}
+                  >
+                    <div className="absolute inset-0 bg-black/55 rounded-sm pointer-events-none z-[5]" />
+                    <div className="relative z-20 flex items-center justify-between">
+                      <span className="font-mono text-[8px] sm:text-[9px] font-bold tracking-[0.2em] uppercase text-white/35 border border-white/10 px-2 py-0.5 rounded-sm">{f.tag}</span>
+                      <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-sm bg-white/[0.07] border border-white/10 flex items-center justify-center text-white/40 transition-all duration-300">
+                        <Icon size={13} />
+                      </div>
+                    </div>
+                    <div className="relative z-20 mt-6 sm:mt-8">
+                      <h3 className="font-bold text-[12px] sm:text-[13px] tracking-widest uppercase text-white/85 mb-2">{f.title}</h3>
+                      <div className="h-px bg-gradient-to-r from-white/15 via-white/5 to-transparent mb-3" />
+                      <p className="font-mono text-[11px] sm:text-[12px] text-white/40 leading-relaxed">{f.desc}</p>
+                    </div>
+                  </NoiseBackground>
+                </Reveal>
+              );
+            })}
+          </div>
+        </div>
       </section>
 
+      {/* CTA */}
       <section className="py-16 sm:py-24 px-4 sm:px-12 text-center border-t border-white/[0.06]">
-        {/* ... CTA section (same content) ... */}
+        <Reveal>
+          <div className="max-w-xl mx-auto">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-sm mx-auto mb-6 flex items-center justify-center" style={GRADIENT_BORDER}>
+              <Zap size={20} className="text-white/70" />
+            </div>
+            <h2 className="font-black tracking-tight mb-4 uppercase px-4" style={{ fontSize: "clamp(24px,4vw,48px)" }}>Start building now</h2>
+            <p className="text-white/30 font-mono text-[12px] sm:text-[13px] mb-8 sm:mb-10">No setup. No config. Just describe your app.</p>
+            <Link
+              href="/signup"
+              className="inline-block px-8 sm:px-10 py-3 sm:py-3.5 rounded-sm font-bold text-[12px] sm:text-[13px] tracking-widest uppercase text-white no-underline hover:-translate-y-0.5 transition-all"
+              style={GRADIENT_BORDER}
+            >
+              Get started free
+            </Link>
+          </div>
+        </Reveal>
       </section>
 
-      <section className="relative py-16 sm:py-28 px-4 sm:px-6 md:px-12 border-t border-white/[0.06] overflow-hidden">
-        {/* ... wobble cards section (same content) ... */}
+      {/* WOBBLE CARDS */}
+      <section className="relative py-20 sm:py-28 px-4 sm:px-6 md:px-12 border-t border-white/[0.06] overflow-hidden">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.15),_transparent_60%)]" />
+        <div className="max-w-5xl mx-auto">
+          <Reveal className="text-center mb-16 sm:mb-20 px-4">
+            <h2 className="font-black text-3xl sm:text-4xl md:text-5xl tracking-tight mb-5 uppercase text-transparent bg-clip-text bg-gradient-to-r from-white to-white/60">
+              Built for builders
+            </h2>
+            <p className="text-white/45 text-[13px] sm:text-[14px] max-w-xl mx-auto leading-relaxed">
+              Everything you need to ship faster, smarter, and with confidence.
+            </p>
+          </Reveal>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+            <WobbleCard containerClassName="col-span-1 lg:col-span-2 min-h-[280px] sm:min-h-[320px] bg-gradient-to-b from-white/[0.06] to-white/[0.02] border border-white/10 backdrop-blur-xl rounded-2xl p-6 sm:p-8">
+              <div className="max-w-md">
+                <h2 className="font-black text-left text-lg sm:text-xl md:text-2xl lg:text-3xl tracking-tight uppercase text-white leading-tight">
+                  Ship your app in minutes, not weeks
+                </h2>
+                <p className="mt-4 sm:mt-5 font-mono text-xs sm:text-sm text-white/50 leading-relaxed">
+                  Describe what you want, watch it get built live. No boilerplate, no config — just your idea running in a sandbox instantly.
+                </p>
+              </div>
+            </WobbleCard>
+
+            <WobbleCard containerClassName="col-span-1 min-h-[280px] sm:min-h-[320px] bg-gradient-to-b from-white/[0.05] to-white/[0.015] border border-white/10 backdrop-blur-xl rounded-2xl p-6 sm:p-8">
+              <h2 className="font-black text-lg sm:text-xl md:text-2xl tracking-tight uppercase text-white leading-tight">
+                30M+ developers trust Web Builder
+              </h2>
+              <p className="mt-4 sm:mt-5 font-mono text-xs sm:text-sm text-white/50 leading-relaxed">
+                Join a global community shipping production apps with AI.
+              </p>
+            </WobbleCard>
+
+            <WobbleCard containerClassName="col-span-1 lg:col-span-3 min-h-[200px] sm:min-h-[240px] bg-gradient-to-b from-white/[0.07] to-white/[0.02] border border-white/10 backdrop-blur-xl rounded-2xl p-6 sm:p-8">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 lg:gap-8 w-full">
+                <div className="max-w-lg">
+                  <h2 className="font-black text-lg sm:text-xl md:text-2xl lg:text-3xl tracking-tight uppercase text-white leading-tight">
+                    GPT-4o. Gemini 2.0. Claude. All in one place.
+                  </h2>
+                  <p className="mt-4 sm:mt-5 font-mono text-xs sm:text-sm text-white/50 leading-relaxed">
+                    Switch models mid-conversation. Use the best AI for each task without ever leaving the chat.
+                  </p>
+                </div>
+                <div className="shrink-0">
+                  <Link
+                    href="/signup"
+                    className="inline-block px-6 sm:px-8 py-2.5 sm:py-3 rounded-md font-semibold text-[12px] sm:text-[13px] tracking-wider uppercase text-white no-underline hover:-translate-y-0.5 transition-all text-center w-full sm:w-auto"
+                    style={GRADIENT_BORDER}
+                  >
+                    Try it free
+                  </Link>
+                </div>
+              </div>
+            </WobbleCard>
+          </div>
+        </div>
       </section>
 
-      <footer className="px-4 sm:px-12 py-12 sm:py-20 border-t border-white/[0.06] flex flex-col items-center justify-center gap-8">
-        <div className="w-full max-w-5xl h-20 sm:h-40">
+      {/* FOOTER */}
+      <footer className="px-4 sm:px-12 py-16 sm:py-20 border-t border-white/[0.06] flex flex-col items-center justify-center gap-6 sm:gap-8">
+        <div className="w-full max-w-5xl h-24 sm:h-32 md:h-40">
           <TextHoverEffect
             text="SEEZER.AI"
             duration={1}
