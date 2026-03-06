@@ -39,9 +39,6 @@ createBullBoard({
 
 app.use('/admin/queues', boardAdapter.getRouter());
 
-// ── Static frontend ──────────────────────────────────────────────────────────
-const frontendPath = path.resolve(__dirname, '../frontend');
-app.use(express.static(frontendPath));
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
@@ -62,9 +59,10 @@ app.use('/projects', projectRouter);
 // ── 404 fallback for API routes ───────────────────────────────────────────────
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
-// ── SPA fallback (serve index.html for all non-API GET routes) ────────────────
-app.get('/*rest', (_req, res) => {
-  res.sendFile(path.join(frontendPath, 'index.html'));
+app.get('/', (_req, res) => {
+  res.json({
+    status: "Seezer backend running 🚀"
+  });
 });
 // ── HTTP server ───────────────────────────────────────────────────────────────
 const server = http.createServer(app);
