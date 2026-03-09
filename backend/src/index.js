@@ -21,7 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT  || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
-// ── Express app ─────────────────────────────────────────────────────────────
+
 const app = express();
 
 app.use(
@@ -36,7 +36,7 @@ app.use(
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// ── Bull Board ───────────────────────────────────────────────────────────────
+
 const boardAdapter = new ExpressAdapter();
 boardAdapter.setBasePath('/admin/queues');
 
@@ -48,7 +48,7 @@ createBullBoard({
 app.use('/admin/queues', boardAdapter.getRouter());
 
 
-// ── Health check ─────────────────────────────────────────────────────────────
+
 app.get('/health', async (_req, res) => {
   try {
     const counts = await buildQueue.getJobCounts();
@@ -58,13 +58,13 @@ app.get('/health', async (_req, res) => {
   }
 });
 
-// ── API routes ────────────────────────────────────────────────────────────────
+
 app.use('/auth',     authRouter);
-app.use('/chat',     chatRouter);      // POST /chat   (note: Express router mounts at prefix)
-app.use('/chats',    chatRouter);      // GET  /chats/:id/messages  etc.
+app.use('/chat',     chatRouter);    
+app.use('/chats',    chatRouter);      
 app.use('/projects', projectRouter);
 
-// ── 404 fallback for API routes ───────────────────────────────────────────────
+
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 app.get('/', (_req, res) => {
@@ -72,17 +72,16 @@ app.get('/', (_req, res) => {
     status: "Seezer backend running 🚀"
   });
 });
-// ── HTTP server ───────────────────────────────────────────────────────────────
+
 const server = http.createServer(app);
 
-// ── WebSocket server (attaches to HTTP upgrade events) ───────────────────────
 attachWebSocket(server);
 
-// ── Start ─────────────────────────────────────────────────────────────────────
+
 server.listen(PORT, HOST, () => {
   console.log(`
 ╔══════════════════════════════════════════════╗
-║           FORGE — AI Website Builder         ║
+║           SEEZER — AI Website Builder        ║
 ╠══════════════════════════════════════════════╣
 ║  HTTP   → http://${HOST}:${PORT}             
 ║  WS     → ws://${HOST}:${PORT}/ws/:chatId    
@@ -91,7 +90,6 @@ server.listen(PORT, HOST, () => {
 `);
 });
 
-// ── Graceful shutdown ─────────────────────────────────────────────────────────
 async function shutdown(signal) {
   console.log(`\n[Server] ${signal} — shutting down…`);
   server.close(async () => {
