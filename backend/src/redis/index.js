@@ -5,7 +5,7 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 const makeClient = (name) => {
   const client = new IORedis(REDIS_URL, {
-    maxRetriesPerRequest: null,   // required by BullMQ
+    maxRetriesPerRequest: null,   
     enableReadyCheck: false,
     lazyConnect: false,
   });
@@ -15,16 +15,15 @@ const makeClient = (name) => {
   return client;
 };
 
-// Used by BullMQ Queue + Worker
+
 export const bullConnection = makeClient('bull');
 
-// Worker → publishes pipeline events
 export const publisher = makeClient('pub');
 
-// WebSocket server → subscribes to pipeline events
+
 export const subscriber = makeClient('sub');
 
-/** Channel name for a given chatId */
+
 export const buildChannel = (chatId) => `build:${chatId}`;
 
 
