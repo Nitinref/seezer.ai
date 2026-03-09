@@ -1,10 +1,6 @@
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'forge_dev_secret';
-
-/**
- * Express middleware — verifies Bearer token and attaches req.user
- */
 export function authenticate(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
@@ -20,17 +16,12 @@ export function authenticate(req, res, next) {
   }
 }
 
-/**
- * Sign a JWT payload.
- */
+
 export function signToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 }
 
-/**
- * Verify a raw token string (used by WebSocket handshake).
- * Throws if invalid.
- */
+
 export function verifyToken(token) {
   return jwt.verify(token, JWT_SECRET);
 }
