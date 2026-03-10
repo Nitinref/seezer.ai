@@ -1,8 +1,5 @@
 import { buildQueue } from '../queues/buildQueue.js';
 
-/**
- * Enqueue a build job and return its ID.
- */
 export async function enqueueBuildJob({ chatId, projectId, userMessage, previousMessages = [] }) {
   const job = await buildQueue.add(
     'build',
@@ -11,9 +8,6 @@ export async function enqueueBuildJob({ chatId, projectId, userMessage, previous
   return { jobId: job.id };
 }
 
-/**
- * Return current BullMQ state for a job.
- */
 export async function getJobStatus(jobId) {
   const job = await buildQueue.getJob(jobId);
   if (!job) return { jobId, state: 'not_found', progress: 0, data: null };
