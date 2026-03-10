@@ -11,7 +11,6 @@ export const apiClient = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// Attach JWT token on every request
 apiClient.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("forge_token");
@@ -20,7 +19,6 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Global 401 handler — clear token + redirect
 apiClient.interceptors.response.use(
   (res) => res,
   (err: AxiosError) => {
@@ -33,7 +31,6 @@ apiClient.interceptors.response.use(
   }
 );
 
-// ── Auth ──────────────────────────────────────────────────────────────────
 export const authApi = {
   login: (email: string, password: string) =>
     apiClient.post<AuthResponse>("/auth/login", { email, password }).then((r) => r.data),
@@ -45,7 +42,6 @@ export const authApi = {
     apiClient.get<{ user: AuthResponse["user"] }>("/auth/me").then((r) => r.data.user),
 };
 
-// ── Projects ──────────────────────────────────────────────────────────────
 export const projectsApi = {
   list: () =>
     apiClient.get<{ projects: Project[] }>("/projects").then((r) => r.data.projects),
@@ -66,7 +62,7 @@ export const projectsApi = {
     apiClient.get<{ file: ProjectFile }>(`/projects/${id}/files/${path}`).then((r) => r.data.file),
 };
 
-// ── Chat ──────────────────────────────────────────────────────────────────
+
 export const chatApi = {
   send: (projectId: string, message: string) =>
     apiClient.post<ChatResponse>("/chat", { projectId, message }).then((r) => r.data),
