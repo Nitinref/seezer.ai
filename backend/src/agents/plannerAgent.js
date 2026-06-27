@@ -1,5 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
-import { makeModel } from '../utils/llm.js';
+import { makeModel, PLANNER_TIMEOUT_MS } from '../utils/llm.js';
 import { PLANNER_SYSTEM } from '../prompts/prompts.js';
 
 function extractJSON(text) {
@@ -16,7 +16,12 @@ function extractJSON(text) {
 }
 
 
-export async function runPlannerAgent(prompt, timeoutMs = 30_000) {
+export async function runPlannerAgent({
+  prompt,
+  timeoutMs = PLANNER_TIMEOUT_MS,
+  emit,
+  chatId
+}){
   const model = makeModel('planner', 0, 1024);
 
   const result = await Promise.race([
@@ -25,7 +30,7 @@ export async function runPlannerAgent(prompt, timeoutMs = 30_000) {
       new HumanMessage(prompt),
     ]),
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('PlannerAgent timeout after 30s')), timeoutMs)
+      setTimeout(() => reject(new Error(`PlannerAgent timeout after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs)
     ),
   ]);
 

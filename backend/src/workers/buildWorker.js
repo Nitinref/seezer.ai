@@ -9,7 +9,12 @@ import { bullConnection, publisher, buildChannel } from '../redis/index.js';
 import { getOrCreateSandbox, makeSandboxTools } from '../tools/sandboxTools.js';
 import { PipelineLogger, classifyError } from '../utils/logger.js';
 import { validatePlan } from '../utils/planValidator.js';
-import { BUILDER_MODEL, PLANNER_MODEL } from '../utils/llm.js';
+import {
+  CLAUDE_BUILDER_MODEL,
+  CLAUDE_PLANNER_MODEL,
+  OPENROUTER_VALIDATOR_MODEL,
+  OPENROUTER_CHECKER_MODEL
+} from '../utils/llm.js';
 import prisma from '../db/index.js';
 
 
@@ -242,7 +247,11 @@ export default defineConfig({
 
       let planOutput;
       try {
-        planOutput = await withRetry(() => runPlannerAgent(planPrompt), 2, 'PlannerAgent');
+        planOutput = await withRetry(() =>runPlannerAgent({
+  prompt: planPrompt,
+  emit,
+  chatId
+}), 2, 'PlannerAgent');
         logger.endStage('PlannerAgent');
       } catch (err) {
         logger.error('PlannerAgent', err);
@@ -276,7 +285,7 @@ export default defineConfig({
 
       try {
         await withRetry(
-          () => runBuilderAgent({ plan: planObj, userMessage, tools: builderTools }),
+          () => runBuilderAgent({ plan: planObj, userMessage, tools: builderTools ,emit,chatId}),
           2, 'BuilderAgent'
         );
         logger.endStage('BuilderAgent');
@@ -294,7 +303,7 @@ export default defineConfig({
 
       try {
         await withRetry(
-          () => runValidatorAgent({ tools: validatorTools }),
+          () => runValidatorAgent({ tools: validatorTools ,emit,chatId}),
           2, 'CodeValidatorAgent'
         );
         logger.endStage('CodeValidatorAgent');
@@ -313,7 +322,7 @@ export default defineConfig({
 
       try {
         checkOutput = await withRetry(
-          () => runCheckerAgent({ tools: checkerTools }),
+          () => runCheckerAgent({ tools: checkerTools,emit,chatId }),
           2, 'AppCheckerAgent'
         );
         logger.endStage('AppCheckerAgent');
@@ -475,10 +484,12 @@ worker.on('error', (err) =>
 );
 
 console.log(JSON.stringify({
-  level: 'info',
-  event: 'worker_started',
-  builderModel: BUILDER_MODEL,
-  plannerModel: PLANNER_MODEL,
+  level: "info",
+  event: "worker_started",
+  plannerModel: CLAUDE_PLANNER_MODEL,
+  builderModel: CLAUDE_BUILDER_MODEL,
+  validatorModel: OPENROUTER_VALIDATOR_MODEL,
+  checkerModel: OPENROUTER_CHECKER_MODEL,
   ts: new Date().toISOString(),
 }));
 

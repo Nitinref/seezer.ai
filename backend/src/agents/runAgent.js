@@ -40,8 +40,13 @@ export async function runReActAgent({
   // NEW
   emit = () => {},
   chatId = null,
+  agentName = "unknown"
 }) {
   const model = makeModel(modelType, temperature, maxTokens);
+  
+  console.log(
+  `[MODEL DEBUG] Agent=${agentName} | ModelType=${modelType}`
+);
   const modelWithTools = tools.length > 0 ? model.bindTools(tools) : model;
   const toolNode = tools.length > 0 ? new ToolNode(tools) : null;
 
@@ -91,6 +96,7 @@ export async function runReActAgent({
     const nodes = Object.keys(chunk);
 
     for (const node of nodes) {
+        await emit(chatId, agentName, `📍 LangGraph node → ${node}`);
       const messages = chunk[node]?.messages ?? [];
       const last = messages.at(-1);
 
@@ -107,19 +113,19 @@ export async function runReActAgent({
           text = last.content.map((p) => p?.text ?? "").join("");
 
         if (text) {
-          await emit(chatId, "agent", `🤖 ${text.slice(0, 150)}`);
+          await emit(chatId, agentName, `🤖 ${text.slice(0, 150)}`);
         }
 
         if (last.tool_calls?.length) {
           for (const t of last.tool_calls) {
-            await emit(chatId, "agent", `🔧 Calling tool: ${t.name}`);
+            await emit(chatId, agentName, `🔧 Calling tool: ${t.name}`);
           }
         }
       }
 
  
       if (type === "tool" || type === "ToolMessage") {
-        await emit(chatId, "agent", "✅ Tool completed");
+        await emit(chatId, agentName, "✅ Tool completed");
       }
     }
 
