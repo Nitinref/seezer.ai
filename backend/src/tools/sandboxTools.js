@@ -1,5 +1,6 @@
 import { Sandbox } from 'e2b';
 import { z } from 'zod';
+import prisma from '../db/index.js';
 
 // ── Sandbox registry: projectId → Sandbox instance ────────────────────────
 const sandboxRegistry = new Map();
@@ -18,12 +19,57 @@ export async function getOrCreateSandbox(projectId) {
     }
   }
 
+  // The registry is process-local. Reconnect to the sandbox saved on the
+  // project after a worker/backend restart instead of silently creating a
+  // fresh empty workspace for the next follow-up message.
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { sandboxId: true },
+  });
+  if (project?.sandboxId && !project.sandboxId.startsWith('local-')) {
+    try {
+      const restored = await Sandbox.connect(project.sandboxId, {
+        apiKey: process.env.E2B_API_KEY,
+      });
+      await restored.files.list('/');
+      sandboxRegistry.set(projectId, restored);
+      console.log(`[Sandbox] Reconnected to saved sandbox for project ${projectId}: ${project.sandboxId}`);
+      return restored;
+    } catch (error) {
+      console.warn(`[Sandbox] Saved sandbox unavailable for ${projectId}; creating a replacement: ${error.message}`);
+    }
+  }
+
   const sb = await Sandbox.create(process.env.E2B_TEMPLATE_ID || 'base', {
     apiKey:    process.env.E2B_API_KEY,
     timeoutMs: 10 * 60 * 1000,
   });
 
   sandboxRegistry.set(projectId, sb);
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { sandboxId: sb.sandboxId },
+  }).catch((error) => console.warn(`[Sandbox] Could not save sandbox id: ${error.message}`));
+
+  // If the old sandbox expired, rebuild its workspace from the files already
+  // synced to the database before the builder starts the follow-up request.
+  try {
+    const savedFiles = await prisma.projectFile.findMany({
+      where: { projectId },
+      select: { path: true, content: true },
+    });
+    if (savedFiles.length) {
+      await Promise.all(savedFiles
+        .filter((file) => file.content != null)
+        .map((file) => sb.files.write(
+          file.path.startsWith('/') ? file.path : `/app/${file.path}`,
+          file.content,
+        )));
+      console.log(`[Sandbox] Restored ${savedFiles.length} saved files for project ${projectId}`);
+    }
+  } catch (error) {
+    console.warn(`[Sandbox] Could not restore saved files: ${error.message}`);
+  }
   console.log(`[Sandbox] Created new sandbox for project ${projectId}: ${sb.sandboxId}`);
   return sb;
 }
@@ -47,6 +93,19 @@ function abs(p) {
   return `/app/${p}`;
 }
 
+function capText(value, max = 12_000) {
+  const text = String(value ?? '');
+  return text.length > max ? `${text.slice(0, max)}\n…[truncated]` : text;
+}
+
+function lineDiff(before, after) {
+  const oldLines = String(before ?? '').split('\n');
+  const newLines = String(after ?? '').split('\n');
+  const removed = oldLines.filter((line, index) => line !== newLines[index]).map((line) => `-${line}`);
+  const added = newLines.filter((line, index) => line !== oldLines[index]).map((line) => `+${line}`);
+  return { diff: [...removed, ...added].join('\n').slice(0, 20_000), additions: added.length, deletions: removed.length };
+}
+
 // ── Tool factory ────────────────────────────────────────────────────────────
 // Returns plain objects { name, description, parameters, execute }
 // Compatible with buildWorker.js toLangChainTools()
@@ -67,8 +126,11 @@ export function makeSandboxTools(projectId) {
       execute: async ({ path, content }) => {
         const sb = await getSb();
         const p  = abs(path);
+        let before = '';
+        try { before = await sb.files.read(p); } catch {}
         await sb.files.write(p, content);
-        return JSON.stringify({ success: true, path: p });
+        const stats = lineDiff(before, content);
+        return JSON.stringify({ success: true, path: p, additions: stats.additions, deletions: stats.deletions, _diffs: `--- ${p}\n${stats.diff}` });
       },
     },
 
@@ -83,7 +145,76 @@ export function makeSandboxTools(projectId) {
         const sb      = await getSb();
         const p       = abs(path);
         const content = await sb.files.read(p);
-        return JSON.stringify({ path: p, content });
+        return JSON.stringify({ path: p, content: capText(content) });
+      },
+    },
+
+    // Read a group of files in one sandbox round-trip.
+    {
+      name: 'read_multiple_files',
+      description: 'Read several project files in one call. Prefer this over repeated read_file calls.',
+      parameters: z.object({
+        paths: z.array(z.string()).min(1).max(12).describe('File paths to read'),
+      }),
+      execute: async ({ paths }) => {
+        const sb = await getSb();
+        const files = await Promise.all(paths.slice(0, 12).map(async (path) => {
+          const p = abs(path);
+          try {
+            return { path: p, content: capText(await sb.files.read(p)), exists: true };
+          } catch (error) {
+            return { path: p, content: '', exists: false, error: error?.message ?? 'File not found' };
+          }
+        }));
+        return capText(JSON.stringify({ files }), 32_000);
+      },
+    },
+
+    // Apply exact in-place edits without sending/re-writing complete files.
+    {
+      name: 'edit_files',
+      description: 'Apply multiple exact text replacements across files in one call. Prefer this for small edits; every old_string must match exactly once unless replace_all is true. Nothing is written if any edit fails.',
+      parameters: z.object({
+        edits: z.array(z.object({
+          path: z.string(),
+          old_string: z.string().min(1),
+          new_string: z.string(),
+          replace_all: z.boolean().optional().default(false),
+        })).min(1).max(20),
+      }),
+      execute: async ({ edits }) => {
+        const sb = await getSb();
+        const originals = new Map();
+        const updated = new Map();
+
+        for (const edit of edits) {
+          const p = abs(edit.path);
+          if (!originals.has(p)) {
+            originals.set(p, await sb.files.read(p));
+            updated.set(p, originals.get(p));
+          }
+
+          const current = updated.get(p);
+          const matches = current.split(edit.old_string).length - 1;
+          if (matches === 0) throw new Error(`edit_files: old_string not found in ${p}`);
+          if (!edit.replace_all && matches !== 1) {
+            throw new Error(`edit_files: old_string matched ${matches} times in ${p}; add context or set replace_all`);
+          }
+          updated.set(p, edit.replace_all
+            ? current.split(edit.old_string).join(edit.new_string)
+            : current.replace(edit.old_string, edit.new_string));
+        }
+
+        await Promise.all([...updated.entries()].map(([path, content]) => sb.files.write(path, content)));
+        const diffs = [...updated.entries()].map(([path, content]) => ({ path, ...lineDiff(originals.get(path), content) }));
+        return JSON.stringify({
+          ok: true,
+          changed_files: [...updated.keys()],
+          edits: edits.length,
+          additions: diffs.reduce((sum, item) => sum + item.additions, 0),
+          deletions: diffs.reduce((sum, item) => sum + item.deletions, 0),
+          _diffs: diffs.map((item) => `--- ${item.path}\n${item.diff}`).join('\n').slice(0, 20_000),
+        });
       },
     },
 
@@ -102,10 +233,13 @@ export function makeSandboxTools(projectId) {
         const results = [];
         for (const { path, content } of files) {
           const p = abs(path);
+          let before = '';
+          try { before = await sb.files.read(p); } catch {}
           await sb.files.write(p, content);
-          results.push({ path: p, success: true });
+          const stats = lineDiff(before, content);
+          results.push({ path: p, success: true, additions: stats.additions, deletions: stats.deletions });
         }
-        return JSON.stringify({ results });
+        return JSON.stringify({ results, additions: results.reduce((sum, item) => sum + item.additions, 0), deletions: results.reduce((sum, item) => sum + item.deletions, 0) });
       },
     },
 
@@ -178,6 +312,27 @@ export function makeSandboxTools(projectId) {
           stdout:   result.stdout,
           stderr:   result.stderr,
           exitCode: result.exitCode,
+        });
+      },
+    },
+
+    // Deterministic build + lint check; avoids separate test_build/command loops.
+    {
+      name: 'verify_project',
+      description: 'Run the production build and, only if it passes, run the project lint script if present.',
+      parameters: z.object({}),
+      execute: async () => {
+        const sb = await getSb();
+        const build = await sb.commands.run('npm run build', { cwd: '/app', timeoutMs: 120_000 });
+        let lint = { skipped: true, exitCode: 0, stdout: '', stderr: '' };
+        if (build.exitCode === 0) {
+          const result = await sb.commands.run('npm run lint --if-present', { cwd: '/app', timeoutMs: 120_000 });
+          lint = { skipped: false, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+        }
+        return JSON.stringify({
+          success: build.exitCode === 0 && lint.exitCode === 0,
+          build: { exitCode: build.exitCode, stdout: build.stdout, stderr: build.stderr },
+          lint,
         });
       },
     },

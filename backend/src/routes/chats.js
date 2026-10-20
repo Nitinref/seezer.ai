@@ -8,7 +8,7 @@ const router = Router();
 // POST /chat — create/reuse chat, enqueue build job
 router.post('/', authenticate, async (req, res) => {
   try {
-    const { projectId, message } = req.body;
+    const { projectId, message, provider, model } = req.body;
     if (!projectId || !message) {
       return res.status(400).json({ error: 'projectId and message are required' });
     }
@@ -47,6 +47,8 @@ router.post('/', authenticate, async (req, res) => {
       projectId,
       userMessage: message,
       previousMessages,
+      provider,
+      model,
     });
 
     return res.status(202).json({ chatId: chat.id, jobId, status: 'queued' });
@@ -63,6 +65,36 @@ router.get('/jobs/:jobId', authenticate, async (req, res) => {
     return res.json(status);
   } catch (err) {
     console.error('[chat/job-status]', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Restore the most recent chat when a project is reopened.
+router.get('/project/:projectId', authenticate, async (req, res) => {
+  try {
+    const chat = await prisma.chat.findFirst({
+      where: { projectId: req.params.projectId, userId: req.user.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, projectId: true, createdAt: true },
+    });
+    return res.json({ chat });
+  } catch (err) {
+    console.error('[chat/project]', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Restore the persisted activity timeline when an existing chat is reopened.
+router.get('/:id/events', authenticate, async (req, res) => {
+  try {
+    const chat = await prisma.chat.findFirst({
+      where: { id: req.params.id, userId: req.user.id },
+      select: { pipelineEvents: true },
+    });
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
+    return res.json({ events: Array.isArray(chat.pipelineEvents) ? chat.pipelineEvents : [] });
+  } catch (err) {
+    console.error('[chat/events]', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

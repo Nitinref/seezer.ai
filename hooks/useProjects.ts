@@ -1,17 +1,32 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import toast from "react-hot-toast";
-import { projectsApi } from "@/lib/api";
+import { chatApi, projectsApi } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
 
 export function useProjects() {
   const qc = useQueryClient();
   const setActiveProject = useAppStore((s) => s.setActiveProject);
+  const activeProject = useAppStore((s) => s.activeProject);
+  const setActiveChatId = useAppStore((s) => s.setActiveChatId);
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects"],
     queryFn: projectsApi.list,
   });
+
+  const latestChatQuery = useQuery({
+    queryKey: ["project-chat", activeProject?.id],
+    queryFn: () => chatApi.latestForProject(activeProject!.id),
+    enabled: !!activeProject?.id,
+    staleTime: 30_000,
+  });
+
+  useEffect(() => {
+    if (!activeProject?.id) return;
+    setActiveChatId(latestChatQuery.data?.id ?? null);
+  }, [activeProject?.id, latestChatQuery.data?.id, setActiveChatId]);
 
   const createMutation = useMutation({
     mutationFn: ({ name, description }: { name: string; description?: string }) =>

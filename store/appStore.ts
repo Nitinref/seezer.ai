@@ -23,6 +23,7 @@ interface AppState {
   setIsBuilding: (v: boolean) => void;
   setBuildProgress: (p: number) => void;
   addPipelineEvent: (event: PipelineEvent) => void;
+  setPipelineEvents: (events: PipelineEvent[]) => void;
   clearPipelineEvents: () => void;
   reset: () => void;
 }
@@ -45,6 +46,7 @@ export const useAppStore = create<AppState>((set) => ({
   setIsBuilding:      (v)  => set({ isBuilding: v }),
   setBuildProgress:   (p)  => set({ buildProgress: p }),
   addPipelineEvent:   (e)  => set((s) => ({ pipelineEvents: [...s.pipelineEvents, e] })),
+  setPipelineEvents:  (events) => set({ pipelineEvents: events }),
   clearPipelineEvents: ()  => set({ pipelineEvents: [] }),
   reset: () => set({
     activeProject: null, activeChatId: null, activeTab: "preview",

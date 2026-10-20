@@ -20,9 +20,10 @@ export async function runPlannerAgent({
   prompt,
   timeoutMs = PLANNER_TIMEOUT_MS,
   emit,
-  chatId
+  chatId,
+  modelOptions = {}
 }){
-  const model = makeModel('planner', 0, 1024);
+  const model = makeModel('planner', 0, 1024, modelOptions);
 
   const result = await Promise.race([
     model.invoke([
@@ -37,8 +38,24 @@ export async function runPlannerAgent({
   const content = result.content;
   let text;
   if (typeof content === 'string') text = content;
-  else if (Array.isArray(content)) text = content.map((p) => (typeof p === 'string' ? p : p?.text ?? '')).join('');
+  else if (Array.isArray(content)) text = content.map((p) => (
+    typeof p === 'string' ? p : p?.text ?? p?.content ?? ''
+  )).join('');
   else text = JSON.stringify(content ?? '');
+
+  if (!text.trim()) {
+    const metadata = result?.additional_kwargs ?? {};
+    const responseMessage = result?.response_metadata?.choices?.[0]?.message ?? {};
+    const alternate = metadata.content
+      ?? metadata.reasoning_content
+      ?? metadata.reasoning
+      ?? responseMessage.content
+      ?? responseMessage.reasoning_content
+      ?? responseMessage.reasoning;
+    if (alternate) text = String(alternate);
+  }
+  console.log(`[PlannerAgent] response fields content=${typeof content} additional=${Object.keys(result?.additional_kwargs ?? {}).join(',') || 'none'}`);
+  console.log(`[PlannerAgent] response chars=${text.trim().length}`);
 
   return extractJSON(text);
 }

@@ -22,20 +22,33 @@ const PROVIDERS = [
       { id: "gemini-1.5-flash",         label: "Gemini 1.5 Flash"    },
     ],
   },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    models: [
+      { id: "openrouter/free", label: "OpenRouter Free Router" },
+    ],
+  },
 ];
 
 const STORAGE_KEY = "forge_ai_provider";
 const STORAGE_MODEL_KEY = "forge_ai_model";
+const DEFAULT_PROVIDER = "openrouter";
+const DEFAULT_MODEL = "openrouter/free";
 
 export function ModelSelector() {
   const [open, setOpen]         = useState(false);
-  const [provider, setProvider] = useState("openai");
-  const [model, setModel]       = useState("gpt-4o");
+  const [provider, setProvider] = useState(DEFAULT_PROVIDER);
+  const [model, setModel]       = useState(DEFAULT_MODEL);
   const [saving, setSaving]     = useState(false);
 
   useEffect(() => {
-    setProvider(localStorage.getItem(STORAGE_KEY) || "openai");
-    setModel(localStorage.getItem(STORAGE_MODEL_KEY) || "gpt-4o");
+    const savedProvider = localStorage.getItem(STORAGE_KEY) || DEFAULT_PROVIDER;
+    const savedModel = localStorage.getItem(STORAGE_MODEL_KEY) || DEFAULT_MODEL;
+    const oldModel = savedModel === "qwen/qwen-2.5-coder:free" || savedModel === "deepseek/deepseek-chat-v3-0324:free";
+    setProvider(savedProvider);
+    setModel(oldModel ? DEFAULT_MODEL : savedModel);
+    if (oldModel) localStorage.setItem(STORAGE_MODEL_KEY, DEFAULT_MODEL);
   }, []);
 
   const currentProvider = PROVIDERS.find(p => p.id === provider) ?? PROVIDERS[0];
@@ -63,8 +76,8 @@ export function ModelSelector() {
     setSaving(false);
   }
 
-  const providerColor = provider === "gemini" ? "#00d2ff" : "#7c5cfc";
-  const providerIcon  = provider === "gemini" ? "✦" : "⬡";
+  const providerColor = provider === "gemini" ? "#00d2ff" : provider === "openrouter" ? "#ff7a45" : "#7c5cfc";
+  const providerIcon  = provider === "gemini" ? "✦" : provider === "openrouter" ? "◈" : "⬡";
 
   return (
     <div style={{ position: "relative" }}>
@@ -102,7 +115,7 @@ export function ModelSelector() {
                 padding: "8px 12px 4px",
                 fontSize: 10, fontWeight: 700, letterSpacing: "1px",
                 textTransform: "uppercase",
-                color: prov.id === "gemini" ? "#00d2ff" : "#7c5cfc",
+                color: prov.id === "gemini" ? "#00d2ff" : prov.id === "openrouter" ? "#ff7a45" : "#7c5cfc",
                 borderTop: prov.id !== PROVIDERS[0].id ? "1px solid rgba(255,255,255,0.06)" : "none",
               }}>
                 {prov.label}
@@ -123,7 +136,7 @@ export function ModelSelector() {
                     onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
                     onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}>
                     {m.label}
-                    {isActive && <span style={{ fontSize: 10, color: prov.id === "gemini" ? "#00d2ff" : "#7c5cfc" }}>✓</span>}
+                    {isActive && <span style={{ fontSize: 10, color: prov.id === "gemini" ? "#00d2ff" : prov.id === "openrouter" ? "#ff7a45" : "#7c5cfc" }}>✓</span>}
                   </button>
                 );
               })}

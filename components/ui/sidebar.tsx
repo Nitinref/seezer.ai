@@ -14,6 +14,7 @@ interface SidebarContextProps {
   open: boolean;
   setOpen: React.Dispatch<React.SetStateAction<boolean>>;
   animate: boolean;
+  hoverExpand: boolean;
 }
 
 const SidebarContext = createContext<SidebarContextProps | undefined>(undefined);
@@ -25,32 +26,34 @@ export const useSidebar = () => {
 };
 
 export const SidebarProvider = ({
-  children, open: openProp, setOpen: setOpenProp, animate = true,
+  children, open: openProp, setOpen: setOpenProp, animate = true, hoverExpand = true,
 }: {
   children: React.ReactNode;
   open?: boolean;
   setOpen?: React.Dispatch<React.SetStateAction<boolean>>;
   animate?: boolean;
+  hoverExpand?: boolean;
 }) => {
   const [openState, setOpenState] = useState(false);
   const open = openProp !== undefined ? openProp : openState;
   const setOpen = setOpenProp !== undefined ? setOpenProp : setOpenState;
   return (
-    <SidebarContext.Provider value={{ open, setOpen, animate }}>
+    <SidebarContext.Provider value={{ open, setOpen, animate, hoverExpand }}>
       {children}
     </SidebarContext.Provider>
   );
 };
 
 export const Sidebar = ({
-  children, open, setOpen, animate,
+  children, open, setOpen, animate, hoverExpand,
 }: {
   children: React.ReactNode;
   open?: boolean;
   setOpen?: React.Dispatch<React.SetStateAction<boolean>>;
   animate?: boolean;
+  hoverExpand?: boolean;
 }) => (
-  <SidebarProvider open={open} setOpen={setOpen} animate={animate}>
+  <SidebarProvider open={open} setOpen={setOpen} animate={animate} hoverExpand={hoverExpand}>
     {children}
   </SidebarProvider>
 );
@@ -65,7 +68,7 @@ export const SidebarBody = (props: React.ComponentProps<typeof motion.div>) => (
 export const DesktopSidebar = ({
   className, children, ...props
 }: React.ComponentProps<typeof motion.div>) => {
-  const { open, setOpen, animate } = useSidebar();
+  const { open, setOpen, animate, hoverExpand } = useSidebar();
   return (
     <motion.div
       className={cn(
@@ -74,8 +77,8 @@ export const DesktopSidebar = ({
         className
       )}
       animate={{ width: animate ? (open ? "300px" : "60px") : "300px" }}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={hoverExpand ? () => setOpen(true) : undefined}
+      onMouseLeave={hoverExpand ? () => setOpen(false) : undefined}
       {...props}
     >
       {children}
@@ -139,7 +142,11 @@ export const SidebarLink = ({
   return (
     <a
       href={link.href}
-      className={cn("flex items-center justify-start gap-2 group/sidebar py-2", className)}
+      className={cn(
+        "group/sidebar flex items-center gap-2 py-2",
+        open ? "justify-start" : "justify-center",
+        className,
+      )}
       {...props}
     >
       {link.icon}

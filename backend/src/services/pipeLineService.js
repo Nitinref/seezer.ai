@@ -1,9 +1,9 @@
 import { buildQueue } from '../queues/buildQueue.js';
 
-export async function enqueueBuildJob({ chatId, projectId, userMessage, previousMessages = [] }) {
+export async function enqueueBuildJob({ chatId, projectId, userMessage, previousMessages = [], provider, model }) {
   const job = await buildQueue.add(
     'build',
-    { chatId, projectId, userMessage, previousMessages },
+    { chatId, projectId, userMessage, previousMessages, provider, model },
   );
   return { jobId: job.id };
 }

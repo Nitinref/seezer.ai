@@ -4,10 +4,10 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import type { PipelineEvent, PipelineStage } from "@/types";
 
-const STAGE_CONFIG: Record<
+const STAGE_CONFIG: Partial<Record<
   PipelineStage,
   { icon: string; text: string }
-> = {
+>> = {
   start: { icon: "▶", text: "text-white" },
   sandbox: { icon: "📦", text: "text-white" },
   planning: { icon: "🧠", text: "text-white" },
@@ -25,7 +25,7 @@ interface Props {
 }
 
 export function StageCard({ event }: Props) {
-  const cfg = STAGE_CONFIG[event.stage] ?? STAGE_CONFIG.start;
+  const cfg = STAGE_CONFIG[event.stage] ?? { icon: "•", text: "text-white" };
 
   return (
     <div

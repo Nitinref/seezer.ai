@@ -18,23 +18,45 @@ export function useChat(chatId: string | null) {
   const token = useAuthStore((s) => s.token);
   const {
     setIsBuilding, setBuildProgress, addPipelineEvent,
-    setPreviewUrl, setActiveChatId, activeProject,
+    setPipelineEvents, setPreviewUrl, setActiveChatId, activeProject,
   } = useAppStore();
   const wsRef = useRef<ForgeWebSocket | null>(null);
 
+  const latestChatQuery = useQuery({
+    queryKey: ["project-chat", activeProject?.id],
+    queryFn: () => chatApi.latestForProject(activeProject!.id),
+    enabled: !chatId && !!activeProject?.id,
+  });
+  const resolvedChatId = chatId ?? latestChatQuery.data?.id ?? null;
+
+  useEffect(() => {
+    if (resolvedChatId && resolvedChatId !== chatId) setActiveChatId(resolvedChatId);
+  }, [resolvedChatId, chatId, setActiveChatId]);
+
   // Load existing messages
   const messagesQuery = useQuery({
-    queryKey: ["messages", chatId],
-    queryFn: () => chatApi.messages(chatId!),
-    enabled: !!chatId,
+    queryKey: ["messages", resolvedChatId],
+    queryFn: () => chatApi.messages(resolvedChatId!),
+    enabled: !!resolvedChatId,
   });
+
+  // Restore thoughts, tool calls, and file changes for reopened projects.
+  const pipelineEventsQuery = useQuery({
+    queryKey: ["pipeline-events", resolvedChatId],
+    queryFn: () => chatApi.pipelineEvents(resolvedChatId!),
+    enabled: !!resolvedChatId,
+  });
+
+  useEffect(() => {
+    if (pipelineEventsQuery.data) setPipelineEvents(pipelineEventsQuery.data);
+  }, [pipelineEventsQuery.data, setPipelineEvents]);
 
   // Connect WebSocket when chatId changes
   useEffect(() => {
-    if (!chatId || !token) return;
+    if (!resolvedChatId || !token) return;
     wsRef.current?.disconnect();
 
-    const ws = new ForgeWebSocket(chatId, token);
+    const ws = new ForgeWebSocket(resolvedChatId, token);
 
     ws.on((event: PipelineEvent) => {
       if (event.type === "connected" || event.type === "pong") return;
@@ -67,7 +89,7 @@ export function useChat(chatId: string | null) {
       ws.disconnect();
       wsRef.current = null;
     };
-  }, [chatId, token]);
+  }, [resolvedChatId, token]);
 
   // Send message
   const sendMutation = useMutation({
@@ -78,7 +100,7 @@ export function useChat(chatId: string | null) {
       setIsBuilding(true);
       setBuildProgress(0);
       // Reconnect WS to new chatId if it changed
-      if (data.chatId !== chatId) {
+      if (data.chatId !== resolvedChatId) {
         setActiveChatId(data.chatId);
       }
     },
@@ -92,5 +114,5 @@ export function useChat(chatId: string | null) {
     wsRef.current?.disconnect();
   }, []);
 
-  return { messagesQuery, sendMutation, disconnect, wsConnected: wsRef.current?.connected ?? false };
+  return { messagesQuery, sendMutation, disconnect, chatId: resolvedChatId, wsConnected: wsRef.current?.connected ?? false };
 }

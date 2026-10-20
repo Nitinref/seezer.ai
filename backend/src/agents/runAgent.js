@@ -21,6 +21,67 @@ function sanitizeContent(content) {
   return String(content);
 }
 
+function compactMessages(messages) {
+  // Keep the system prompt, original request, and only the recent tool loop.
+  // Re-sending every previous tool result makes each ReAct turn larger.
+  let tailStart = messages.length > 12 ? messages.length - 10 : 0;
+
+  // Never start the compacted history with an orphan ToolMessage. Providers
+  // expect every tool result to follow the AI message that requested it;
+  // cutting that pair in half causes errors like "reading message".
+  if (tailStart > 2) {
+    const firstTail = messages[tailStart];
+    const type = firstTail?._getType?.() ?? firstTail?.role ?? firstTail?.type;
+    if (type === "tool" || type === "ToolMessage") tailStart -= 1;
+  }
+
+  const kept = tailStart > 0
+    ? [messages[0], messages[1], ...messages.slice(tailStart)]
+    : messages;
+  const seen = new Set();
+
+  return kept.filter(Boolean).filter((message) => {
+    if (seen.has(message)) return false;
+    seen.add(message);
+    return true;
+  }).map((message, index) => {
+    const content = sanitizeContent(message.content);
+    const limit = index === 0 ? 14_000 : 8_000;
+    return {
+      ...message,
+      content: typeof content === "string" ? content.slice(0, limit) : content,
+    };
+  });
+}
+
+function normalizeToolCalls(message) {
+  if (message?.tool_calls?.length) return message;
+
+  // Some older LangChain provider adapters leave OpenAI-compatible tool
+  // calls under additional_kwargs instead of setting AIMessage.tool_calls.
+  // LangGraph's ToolNode only follows the normalized field.
+  const rawCalls = message?.additional_kwargs?.tool_calls;
+  if (!Array.isArray(rawCalls) || rawCalls.length === 0) return message;
+
+  const toolCalls = rawCalls.map((call, index) => {
+    const fn = call?.function ?? call;
+    let args = fn?.arguments ?? fn?.args ?? {};
+    if (typeof args === "string") {
+      try { args = JSON.parse(args); } catch { args = {}; }
+    }
+    return {
+      name: fn?.name ?? call?.name ?? "",
+      args,
+      id: call?.id ?? `tool_call_${Date.now()}_${index}`,
+      type: "tool_call",
+    };
+  }).filter((call) => call.name);
+
+  if (!toolCalls.length) return message;
+  message.tool_calls = toolCalls;
+  return message;
+}
+
 const AgentState = Annotation.Root({
   messages: Annotation({
     reducer: (a, b) => [...a, ...b],
@@ -40,9 +101,10 @@ export async function runReActAgent({
   // NEW
   emit = () => {},
   chatId = null,
-  agentName = "unknown"
+  agentName = "unknown",
+  modelOptions = {}
 }) {
-  const model = makeModel(modelType, temperature, maxTokens);
+  const model = makeModel(modelType, temperature, maxTokens, modelOptions);
   
   console.log(
   `[MODEL DEBUG] Agent=${agentName} | ModelType=${modelType}`
@@ -51,12 +113,9 @@ export async function runReActAgent({
   const toolNode = tools.length > 0 ? new ToolNode(tools) : null;
 
   const graph = new StateGraph(AgentState).addNode("agent", async (state) => {
-    const msgs = state.messages.map((m) => ({
-      ...m,
-      content: sanitizeContent(m.content),
-    }));
+    const msgs = compactMessages(state.messages);
 
-    const result = await modelWithTools.invoke(msgs);
+    const result = normalizeToolCalls(await modelWithTools.invoke(msgs));
     return { messages: [result] };
   });
 

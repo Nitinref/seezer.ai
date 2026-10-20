@@ -7,7 +7,7 @@ import { VALIDATOR_TIMEOUT_MS } from '../utils/llm.js';
  * @param {Array}  tools      — validator tools: read_file, create_file, list_directory, check_missing_packages, save_context
  * @param {number} timeoutMs
  */
-export async function runValidatorAgent({ tools, timeoutMs = VALIDATOR_TIMEOUT_MS,emit,chatId}) {
+export async function runValidatorAgent({ tools, timeoutMs = VALIDATOR_TIMEOUT_MS,emit,chatId,modelOptions = {}}) {
     return Promise.race([
         runReActAgent({
             systemPrompt: VALIDATOR_SYSTEM,
@@ -16,10 +16,11 @@ export async function runValidatorAgent({ tools, timeoutMs = VALIDATOR_TIMEOUT_M
             emit,
             chatId,
             temperature: 0.1,
-            maxTokens: 2048,  // 4096 → 2048
-            maxSteps: 8,
-            modelType: 'planner',
-            agentName:'validator' // haiku
+            maxTokens: 1024,
+            maxSteps: 5,
+            modelType: 'validator',
+            agentName:'validator', // haiku
+            modelOptions
         }),
         new Promise((_, reject) =>
             setTimeout(() => reject(new Error(`ValidatorAgent timeout after ${timeoutMs / 1000}s`)), timeoutMs)

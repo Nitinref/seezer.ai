@@ -82,13 +82,12 @@ export function CodeViewer() {
     <div className="h-full flex overflow-hidden bg-[#0a0a0a]">
 
       {/* ── FILE TREE SIDEBAR ── */}
-      <div className="w-52 shrink-0 flex flex-col border-r border-white/[0.05] bg-[#0c0c0c] overflow-y-auto">
+      <div className="w-60 shrink-0 flex flex-col border-r border-white/[0.08] bg-[#0b0c0d] overflow-y-auto">
         
         {/* Sidebar header */}
-        <div className="px-3 py-2.5 border-b border-white/[0.05]">
-          <span className="text-[10px] font-mono font-medium text-white/30 uppercase tracking-widest">
-            EXPLORER
-          </span>
+        <div className="px-4 py-4 border-b border-white/[0.08]">
+          <p className="text-[18px] font-semibold text-white/90">Files</p>
+          <span className="mt-1 block text-[13px] text-white/35">{files.length} files</span>
         </div>
 
         {/* File list */}
@@ -224,7 +223,7 @@ export function CodeViewer() {
               theme="vs-dark"
               options={{
                 readOnly: true,
-                fontSize: 12,
+                fontSize: 14,
                 fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
                 fontLigatures: true,
                 lineNumbers: "on",

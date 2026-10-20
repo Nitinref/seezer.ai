@@ -1,432 +1,64 @@
 "use client";
-import React, { useEffect, useState } from "react";
+
 import Link from "next/link";
+import { ArrowUpRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
-import { ChevronRight, Plus, Paperclip, Settings, ArrowUp, FolderOpen, Zap, Eye, Brain, FileCode, RefreshCw, Menu, X } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Spotlight } from "@/components/ui/spotlight";
-import { WobbleCard } from "@/components/ui/wobble-card";
-import { NoiseBackground } from "@/components/ui/noise-background";
-import { TextHoverEffect } from "@/components/ui/text-hover-effect";
-import { GoogleGeminiEffect } from "@/components/ui/google-gemini-effect";
+import { CardStack, type CardStackItem } from "@/components/ui/card-stack";
+import { BlurredStagger } from "@/components/ui/blurred-stagger-text";
 
-const GRADIENT_BORDER = {
-  background: "linear-gradient(#0a0a0a, #0a0a0a) padding-box, linear-gradient(135deg, rgb(99,220,180), rgb(80,120,255), rgb(200,60,255), rgb(255,80,120)) border-box",
-  border: "1.5px solid transparent",
-};
+const HERO = "/hero-balloon-meadow.png";
 
-function useReveal() {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const obs = new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) { setVisible(true); obs.disconnect(); }
-    }, { threshold: 0.1 });
-    if (ref.current) obs.observe(ref.current);
-    return () => obs.disconnect();
-  }, []);
-  return { ref, visible };
-}
-
-function Reveal({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
-  const { ref, visible } = useReveal();
-  return (
-    <div ref={ref} className={cn("transition-all duration-700 ease-out", visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-7", className)} style={{ transitionDelay: `${delay}ms` }}>
-      {children}
-    </div>
-  );
-}
-
-function HeroInput() {
-  const [msg, setMsg] = useState("");
-  const [showBanner, setShowBanner] = useState(true);
-  const router = useRouter();
-  const { token } = useAuthStore();
-
-  function handleGo() {
-    if (!msg.trim()) return;
-    sessionStorage.setItem("forge_initial_prompt", msg.trim());
-    router.push("/signup");
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleGo(); }
-  }
-
-  const canGo = !!msg.trim();
-
-  return (
-    <div className="w-full max-w-2xl mx-auto px-4 sm:px-0">
-
-      {/* Input box */}
-      <div className="relative rounded-sm p-[1.5px] bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500">
-        <div className="relative bg-[#0a0a0a] rounded-sm overflow-hidden">
-          <textarea
-            value={msg}
-            onChange={e => setMsg(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Describe what you want to build..."
-            rows={3}
-            className="w-full bg-transparent border-none outline-none px-4 sm:px-5 pt-5 pb-2 text-white font-mono text-[14px] leading-relaxed resize-none placeholder:text-white/30 focus:outline-none"
-          />
-          <div className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 pb-4 pt-1 border-t border-white/10 overflow-x-auto">
-            <button className="w-7 h-7 sm:w-8 sm:h-8 rounded-sm border border-white/20 flex items-center justify-center text-white/50 hover:text-white hover:border-white/40 transition-colors bg-transparent flex-shrink-0">
-              <Plus size={14} />
-            </button>
-            <button className="w-7 h-7 sm:w-8 sm:h-8 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors bg-transparent border-none flex-shrink-0">
-              <Paperclip size={13} />
-            </button>
-            <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-sm border border-white/20 bg-transparent text-white/70 font-mono text-[10px] sm:text-[11px] cursor-pointer hover:border-white/40 hover:text-white transition-all select-none tracking-wide flex-shrink-0">
-              Select Models <ChevronRight size={10} className="opacity-70" />
-            </div>
-            <div className="flex-1 min-w-[8px]" />
-            <button className="w-7 h-7 sm:w-8 sm:h-8 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors bg-transparent border-none flex-shrink-0">
-              <Settings size={13} />
-            </button>
-            <button
-              onClick={handleGo}
-              className={cn(
-                "w-8 h-8 sm:w-9 sm:h-9 rounded-sm flex items-center justify-center transition-all duration-150 border flex-shrink-0",
-                canGo
-                  ? "bg-white text-black cursor-pointer hover:bg-white/90 hover:scale-105 active:scale-95 border-white"
-                  : "bg-transparent text-white/30 border-white/20 cursor-default"
-              )}
-            >
-              <ArrowUp size={15} />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Banner */}
-      {showBanner && (
-        <div className="mt-4 px-3 sm:px-4 py-3 rounded-sm border border-white/20 bg-[#0a0a0a] flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <span className="px-2 py-0.5 rounded-sm bg-white text-black font-mono text-[10px] font-bold tracking-widest uppercase shrink-0">NEW</span>
-            <span className="font-mono text-[11px] sm:text-[12px] text-white/60 truncate">Advanced AI on Browser, CLI, Phone...</span>
-          </div>
-          <div className="flex items-center gap-2 ml-auto sm:ml-0">
-            <button onClick={() => setShowBanner(false)} className="font-mono text-[10px] sm:text-[11px] text-white/40 hover:text-white/70 transition-colors bg-transparent border-none cursor-pointer px-2">Close</button>
-            <Link href="/signup" className="px-2 sm:px-3 py-1.5 rounded-sm bg-white text-black font-mono text-[10px] sm:text-[11px] font-bold tracking-wide hover:bg-white/90 transition-colors no-underline whitespace-nowrap">Explore</Link>
-          </div>
-        </div>
-      )}
-
-      {/* Bottom text */}
-      <p className="text-center font-mono text-[10px] sm:text-[11px] text-white/30 mt-4 px-4">
-        Get access to the best AI Agent. +30M users choose WEB BUILDER.{" "}
-        <Link href="/signup" className="text-white/60 hover:text-white transition-colors no-underline underline underline-offset-2 whitespace-nowrap">Upgrade plan</Link>
-      </p>
-
-      {/* CTA buttons */}
-      <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 px-4">
-        <Link
-          href="/signup"
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-sm bg-white text-black font-bold font-mono text-[12px] tracking-widest uppercase no-underline hover:bg-white/90 hover:-translate-y-0.5 hover:shadow-[0_0_20px_rgba(255,255,255,0.2)] transition-all"
-        >
-          Explore Now <ArrowUp size={13} className="rotate-45" />
-        </Link>
-        <a
-          href="https://github.com/Nitinref/seezer.ai"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-sm font-mono text-[12px] tracking-widest uppercase text-white/70 hover:text-white no-underline hover:-translate-y-0.5 transition-all border border-white/20 bg-transparent hover:border-white/40"
-        >
-          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
-          </svg>
-          Star on GitHub
-        </a>
-      </div>
-    </div>
-  );
-}
-
-const FEATURES = [
-  { icon: Eye, title: "Instant Preview", desc: "Live sandbox URL with every build. See changes in real-time without leaving the chat.", tag: "Live", gradientColors: ["rgb(99,220,180)", "rgb(50,150,255)", "rgb(120,80,255)"], span: "col-span-1 sm:col-span-2" },
-  { icon: Brain, title: "Multi-Model AI", desc: "Switch between GPT-4o and Gemini 2.0 Flash in one click.", tag: "AI", gradientColors: ["rgb(255,100,180)", "rgb(200,60,255)", "rgb(100,60,200)"], span: "col-span-1" },
-  { icon: FileCode, title: "Full Code Access", desc: "Browse, copy, and download every generated file. Your code, your ownership.", tag: "Files", gradientColors: ["rgb(255,160,50)", "rgb(255,80,80)", "rgb(200,50,120)"], span: "col-span-1" },
-  { icon: RefreshCw, title: "Iterative Builds", desc: "Chat to refine your app. FORGE never starts from scratch — always builds on context.", tag: "Chat", gradientColors: ["rgb(60,200,255)", "rgb(80,120,255)", "rgb(160,60,255)"], span: "col-span-1 sm:col-span-2" },
+const CARD_ITEMS: CardStackItem[] = [
+  { id: 1, title: "Describe it in plain words.", description: "No spec, no scaffolding, no setup screen to fill in first.", imageSrc: HERO, tag: "01" },
+  { id: 2, title: "Read the plan, then it builds.", description: "See what you’ll get in your own words. Approve it, and Sizzer writes the screens, server, and database.", imageSrc: "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=1000&q=85", tag: "02" },
+  { id: 3, title: "Keep every line of it.", description: "Read each file, download the project, and run your AI-built website anywhere you like.", imageSrc: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1000&q=85", tag: "03" },
+  { id: 4, title: "Test it in the browser.", description: "Sizzer checks each change so your pages work before you share them with the world.", imageSrc: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1000&q=85", tag: "04" },
+  { id: 5, title: "Ship your next idea.", description: "Publish the finished website and keep improving it with plain-language prompts.", imageSrc: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=1000&q=85", tag: "05" },
 ];
 
-export default function LandingPage() {
-  const [scrolled, setScrolled] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { token, user } = useAuthStore();
-  const router = useRouter();
-
-  useEffect(() => {
-    const fn = () => setScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", fn);
-    return () => window.removeEventListener("scroll", fn);
-  }, []);
-
-  // Close mobile menu when route changes
-  useEffect(() => {
-    setMobileMenuOpen(false);
-  }, [router]);
-
-  return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-mono overflow-x-hidden">
-
-      {/* Corner brackets - hidden on mobile */}
-      <span className="hidden sm:block pointer-events-none fixed top-0 left-0 z-[60] w-3 h-3 border-t-2 border-l-2 border-white/20" />
-      <span className="hidden sm:block pointer-events-none fixed top-0 right-0 z-[60] w-3 h-3 border-t-2 border-r-2 border-white/20" />
-      <span className="hidden sm:block pointer-events-none fixed bottom-0 left-0 z-[60] w-3 h-3 border-b-2 border-l-2 border-white/20" />
-      <span className="hidden sm:block pointer-events-none fixed bottom-0 right-0 z-[60] w-3 h-3 border-b-2 border-r-2 border-white/20" />
-
-      {/* NAV - Mobile responsive */}
-      <nav className={cn(
-        "fixed top-0 left-0 right-0 z-50 h-16 flex items-center justify-between px-4 sm:px-8 md:px-16 transition-all duration-500",
-        scrolled ? "bg-black/80 backdrop-blur-xl border-b border-white/10 shadow-[0_4px_30px_rgba(0,0,0,0.3)]" : "bg-transparent border-b border-transparent"
-      )}>
-        <span className="font-bold text-[12px] sm:text-[14px] tracking-[0.25em] uppercase text-white">SEEZER.AI</span>
-        
-        {/* Desktop Navigation */}
-        <div className="hidden md:flex items-center gap-6 lg:gap-10">
-          {["Pricing", "Product", "Docs"].map(l => (
-            <a key={l} href="#" className="relative text-white/50 text-[13px] tracking-wide transition-colors duration-300 hover:text-white group">
-              {l}
-              <span className="absolute left-0 -bottom-1 h-[1px] w-0 bg-white transition-all duration-300 group-hover:w-full" />
-            </a>
-          ))}
-          {token && (
-            <Link href="/dashboard" className="relative flex items-center gap-1.5 text-white/50 text-[13px] tracking-wide transition-colors duration-300 hover:text-white group no-underline">
-              <FolderOpen size={14} /> My Projects
-              <span className="absolute left-0 -bottom-1 h-[1px] w-0 bg-white transition-all duration-300 group-hover:w-full" />
-            </Link>
-          )}
-        </div>
-
-        {/* Desktop Auth Buttons */}
-        <div className="hidden md:flex items-center gap-3">
-          {token ? (
-            <>
-              <div className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.05] text-[12px] text-white/50 backdrop-blur-md truncate max-w-[150px]">
-                {user?.email}<span className="text-white/70"> · 0 tokens</span>
-              </div>
-              <Link href="/dashboard" className="px-5 py-2 rounded-md bg-white text-black text-[13px] font-semibold hover:bg-white/90 transition-all no-underline whitespace-nowrap">Dashboard</Link>
-            </>
-          ) : (
-            <>
-              <Link href="/login" className="px-4 py-2 rounded-md border border-white/15 text-white/50 text-[13px] hover:text-white hover:border-white/30 transition-all no-underline">Sign In</Link>
-              <Link href="/signup" className="px-5 py-2 rounded-md bg-white text-black text-[13px] font-semibold hover:bg-white/90 transition-all no-underline">Get Started</Link>
-            </>
-          )}
-        </div>
-
-        {/* Mobile Menu Button */}
-        <button 
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="md:hidden p-2 rounded-sm border border-white/20 text-white/70 hover:text-white hover:border-white/40 transition-all"
-        >
-          {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
-
-        {/* Mobile Menu Dropdown */}
-        {mobileMenuOpen && (
-          <div className="absolute top-16 left-0 right-0 bg-black/95 backdrop-blur-xl border-b border-white/10 py-4 px-4 md:hidden animate-in slide-in-from-top duration-300">
-            <div className="flex flex-col space-y-4">
-              {["Pricing", "Product", "Docs"].map(l => (
-                <a key={l} href="#" className="text-white/70 hover:text-white text-[14px] tracking-wide py-2 transition-colors">
-                  {l}
-                </a>
-              ))}
-              {token && (
-                <Link href="/dashboard" className="flex items-center gap-2 text-white/70 hover:text-white text-[14px] tracking-wide py-2 transition-colors">
-                  <FolderOpen size={16} /> My Projects
-                </Link>
-              )}
-              <div className="border-t border-white/10 my-2" />
-              {token ? (
-                <>
-                  <div className="text-white/50 text-[12px] py-2 truncate">
-                    {user?.email} · 0 tokens
-                  </div>
-                  <Link href="/dashboard" className="w-full px-4 py-2.5 rounded-md bg-white text-black text-[13px] font-semibold hover:bg-white/90 transition-all text-center">
-                    Dashboard
-                  </Link>
-                </>
-              ) : (
-                <>
-                  <Link href="/login" className="w-full px-4 py-2.5 rounded-md border border-white/20 text-white/70 text-[13px] hover:text-white hover:border-white/30 transition-all text-center">
-                    Sign In
-                  </Link>
-                  <Link href="/signup" className="w-full px-4 py-2.5 rounded-md bg-white text-black text-[13px] font-semibold hover:bg-white/90 transition-all text-center">
-                    Get Started
-                  </Link>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </nav>
-
-      {/* HERO */}
-      <section className="min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-20 pb-16 text-center relative">
-        <Spotlight className="-top-20 left-1/2 -translate-x-1/2" fill="white" />
-        <div className="absolute inset-0 z-[1] bg-gradient-to-b from-[#0a0a0a]/40 via-transparent to-[#0a0a0a] pointer-events-none" />
-
-        {/* Badge */}
-        <div className="relative z-10 flex justify-center mb-6 animate-in fade-in slide-in-from-bottom-3 duration-500 px-4">
-          <button
-            onClick={() => router.push(token ? "/dashboard" : "/signup")}
-            className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-sm border border-white/10 bg-white/[0.04] font-mono text-[10px] sm:text-[11px] text-white/50 hover:bg-white/[0.07] hover:text-white/75 transition-all cursor-pointer tracking-wide whitespace-nowrap"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-white/70 inline-block animate-pulse" />
-            New — Try AI Agents
-            <ChevronRight size={12} className="opacity-50" />
-          </button>
-        </div>
-
-        {/* Title */}
-        <div className="relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100 px-4">
-          <h1 className="font-black text-white leading-none tracking-[-0.04em] uppercase mb-6" style={{ fontSize: "clamp(32px,7vw,80px)" }}>
-            Launch your website
-            <br />
-            <span className="text-white/40">in hours, not days</span>
-          </h1>
-          <p className="max-w-xl mx-auto font-mono text-[12px] sm:text-[13px] text-white/35 leading-relaxed mb-10 px-4">
-            With AI, you can launch your website in hours, not days. Try our best in class,
-            state of the art, cutting edge AI tools to get your website up and running.
-          </p>
-        </div>
-
-        {/* Input */}
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-200 relative z-10 w-full">
-          <HeroInput />
-        </div>
-      </section>
-
-      {/* FEATURES */}
-      <section className="py-20 sm:py-32 px-4 sm:px-6 md:px-12 border-t border-white/[0.06] overflow-hidden">
-        <div className="max-w-6xl mx-auto">
-          <Reveal className="text-center mb-16 sm:mb-24 px-4">
-            <h2 className="font-black text-3xl sm:text-4xl md:text-5xl tracking-tight mb-4 uppercase">Everything in one place</h2>
-            <p className="text-white/35 text-[13px] sm:text-[14px] max-w-xl mx-auto">Build, preview, and iterate — all from a single chat interface.</p>
-          </Reveal>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 px-2 sm:px-0">
-            {FEATURES.map((f, i) => {
-              const Icon = f.icon;
-              return (
-                <Reveal key={f.title} delay={i * 80} className={f.span}>
-                  <NoiseBackground
-                    containerClassName={cn("h-full min-h-[200px] sm:min-h-[220px] !rounded-sm", "![background:_#0d0d0d] dark:![background:_#0d0d0d]")}
-                    className="h-full p-5 sm:p-6 flex flex-col justify-between min-h-[180px] sm:min-h-[196px]"
-                    gradientColors={f.gradientColors}
-                    noiseIntensity={0.18}
-                    speed={0.08}
-                    animating={true}
-                  >
-                    <div className="absolute inset-0 bg-black/55 rounded-sm pointer-events-none z-[5]" />
-                    <div className="relative z-20 flex items-center justify-between">
-                      <span className="font-mono text-[8px] sm:text-[9px] font-bold tracking-[0.2em] uppercase text-white/35 border border-white/10 px-2 py-0.5 rounded-sm">{f.tag}</span>
-                      <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-sm bg-white/[0.07] border border-white/10 flex items-center justify-center text-white/40 transition-all duration-300">
-                        <Icon size={13} />
-                      </div>
-                    </div>
-                    <div className="relative z-20 mt-6 sm:mt-8">
-                      <h3 className="font-bold text-[12px] sm:text-[13px] tracking-widest uppercase text-white/85 mb-2">{f.title}</h3>
-                      <div className="h-px bg-gradient-to-r from-white/15 via-white/5 to-transparent mb-3" />
-                      <p className="font-mono text-[11px] sm:text-[12px] text-white/40 leading-relaxed">{f.desc}</p>
-                    </div>
-                  </NoiseBackground>
-                </Reveal>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="py-16 sm:py-24 px-4 sm:px-12 text-center border-t border-white/[0.06]">
-        <Reveal>
-          <div className="max-w-xl mx-auto">
-            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-sm mx-auto mb-6 flex items-center justify-center" style={GRADIENT_BORDER}>
-              <Zap size={20} className="text-white/70" />
-            </div>
-            <h2 className="font-black tracking-tight mb-4 uppercase px-4" style={{ fontSize: "clamp(24px,4vw,48px)" }}>Start building now</h2>
-            <p className="text-white/30 font-mono text-[12px] sm:text-[13px] mb-8 sm:mb-10">No setup. No config. Just describe your app.</p>
-            <Link
-              href="/signup"
-              className="inline-block px-8 sm:px-10 py-3 sm:py-3.5 rounded-sm font-bold text-[12px] sm:text-[13px] tracking-widest uppercase text-white no-underline hover:-translate-y-0.5 transition-all"
-              style={GRADIENT_BORDER}
-            >
-              Get started free
-            </Link>
-          </div>
-        </Reveal>
-      </section>
-
-      {/* WOBBLE CARDS */}
-      <section className="relative py-20 sm:py-28 px-4 sm:px-6 md:px-12 border-t border-white/[0.06] overflow-hidden">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.15),_transparent_60%)]" />
-        <div className="max-w-5xl mx-auto">
-          <Reveal className="text-center mb-16 sm:mb-20 px-4">
-            <h2 className="font-black text-3xl sm:text-4xl md:text-5xl tracking-tight mb-5 uppercase text-transparent bg-clip-text bg-gradient-to-r from-white to-white/60">
-              Built for builders
-            </h2>
-            <p className="text-white/45 text-[13px] sm:text-[14px] max-w-xl mx-auto leading-relaxed">
-              Everything you need to ship faster, smarter, and with confidence.
-            </p>
-          </Reveal>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-            <WobbleCard containerClassName="col-span-1 lg:col-span-2 min-h-[280px] sm:min-h-[320px] bg-gradient-to-b from-white/[0.06] to-white/[0.02] border border-white/10 backdrop-blur-xl rounded-2xl p-6 sm:p-8">
-              <div className="max-w-md">
-                <h2 className="font-black text-left text-lg sm:text-xl md:text-2xl lg:text-3xl tracking-tight uppercase text-white leading-tight">
-                  Ship your app in minutes, not weeks
-                </h2>
-                <p className="mt-4 sm:mt-5 font-mono text-xs sm:text-sm text-white/50 leading-relaxed">
-                  Describe what you want, watch it get built live. No boilerplate, no config — just your idea running in a sandbox instantly.
-                </p>
-              </div>
-            </WobbleCard>
-
-            <WobbleCard containerClassName="col-span-1 min-h-[280px] sm:min-h-[320px] bg-gradient-to-b from-white/[0.05] to-white/[0.015] border border-white/10 backdrop-blur-xl rounded-2xl p-6 sm:p-8">
-              <h2 className="font-black text-lg sm:text-xl md:text-2xl tracking-tight uppercase text-white leading-tight">
-                30M+ developers trust Web Builder
-              </h2>
-              <p className="mt-4 sm:mt-5 font-mono text-xs sm:text-sm text-white/50 leading-relaxed">
-                Join a global community shipping production apps with AI.
-              </p>
-            </WobbleCard>
-
-            <WobbleCard containerClassName="col-span-1 lg:col-span-3 min-h-[200px] sm:min-h-[240px] bg-gradient-to-b from-white/[0.07] to-white/[0.02] border border-white/10 backdrop-blur-xl rounded-2xl p-6 sm:p-8">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 lg:gap-8 w-full">
-                <div className="max-w-lg">
-                  <h2 className="font-black text-lg sm:text-xl md:text-2xl lg:text-3xl tracking-tight uppercase text-white leading-tight">
-                    GPT-4o. Gemini 2.0. Claude. All in one place.
-                  </h2>
-                  <p className="mt-4 sm:mt-5 font-mono text-xs sm:text-sm text-white/50 leading-relaxed">
-                    Switch models mid-conversation. Use the best AI for each task without ever leaving the chat.
-                  </p>
-                </div>
-                <div className="shrink-0">
-                  <Link
-                    href="/signup"
-                    className="inline-block px-6 sm:px-8 py-2.5 sm:py-3 rounded-md font-semibold text-[12px] sm:text-[13px] tracking-wider uppercase text-white no-underline hover:-translate-y-0.5 transition-all text-center w-full sm:w-auto"
-                    style={GRADIENT_BORDER}
-                  >
-                    Try it free
-                  </Link>
-                </div>
-              </div>
-            </WobbleCard>
-          </div>
-        </div>
-      </section>
-
-      {/* FOOTER */}
-      <footer className="px-4 sm:px-12 py-16 sm:py-20 border-t border-white/[0.06] flex flex-col items-center justify-center gap-6 sm:gap-8">
-        <div className="w-full max-w-5xl h-24 sm:h-32 md:h-40">
-          <TextHoverEffect
-            text="SEEZER.AI"
-            duration={1}
-          />
-        </div>
-        <span className="font-mono text-[11px] sm:text-[13px] text-white/40 tracking-widest text-center px-4">2026 — Build anything with AI</span>
-      </footer>
-    </div>
-  );
+function WebsiteBuilderCard({ item }: { item: CardStackItem }) {
+  const imageFirst = item.id === 2;
+  const image = <img src={item.imageSrc} alt="AI website builder preview" className="h-[46%] w-full object-cover" style={{ objectPosition: `${35 + Number(item.id) * 10}% center`, filter: `saturate(${0.92 + Number(item.id) * 0.025}) hue-rotate(${(Number(item.id) - 1) * 3}deg)` }} draggable={false} />;
+  const copy = <div className="flex min-h-0 flex-1 flex-col justify-between p-6 text-left sm:p-7"><div className="flex items-center justify-between"><span className="grid h-7 w-7 place-items-center rounded-full border-2 border-[#142332] text-sm font-bold text-[#142332]">c</span><span className="text-xs tracking-[0.2em] text-[#142332]">{item.tag}</span></div><div><h3 className="max-w-[260px] text-[24px] leading-[1.05] tracking-[-0.04em] text-[#071b2e]">{item.title}</h3><p className="mt-4 max-w-[290px] text-[15px] leading-6 text-[#657889]">{item.description}</p></div></div>;
+  return <div className="flex h-full w-full flex-col overflow-hidden bg-[#fffdf8]">{imageFirst ? <>{image}{copy}</> : <>{copy}{image}</>}</div>;
 }
+
+function Brand({ light = false }: { light?: boolean }) {
+  return <span className={`flex items-center gap-2 text-[18px] font-semibold tracking-[-0.04em] ${light ? "text-white" : "text-[#17202b]"}`}><span className="grid h-7 w-7 place-items-center rounded-full border-2 border-current text-[15px] font-bold">c</span>sizzer</span>;
+}
+
+function StartButton() {
+  const router = useRouter();
+  const { token } = useAuthStore();
+  return <button onClick={() => router.push(token ? "/dashboard" : "/signup")} className="group inline-flex items-center gap-3 rounded-full border border-white/40 bg-white/[0.12] px-5 py-2.5 font-sans text-[14px] font-medium text-white backdrop-blur-md transition hover:bg-white/20"><span>Start building</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white/15 transition group-hover:translate-x-0.5"><ArrowUpRight size={15} /></span></button>;
+}
+
+export default function LandingPage() {
+  const router = useRouter();
+  const { token } = useAuthStore();
+  function begin() { router.push(token ? "/dashboard" : "/signup"); }
+
+  return <main className="min-h-screen overflow-hidden bg-[#fafbf8] text-[#17202b]">
+    <section className="relative min-h-screen overflow-hidden bg-[#28729a]">
+      <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `linear-gradient(180deg, rgba(14,74,107,.35), rgba(12,66,84,.18) 48%, rgba(12,55,37,.25)), url(${HERO})` }} />
+      <header className="relative z-10 mx-auto flex max-w-[760px] items-center justify-between rounded-full border border-white/45 bg-[#3784ad]/65 px-5 py-2.5 text-white shadow-[0_12px_35px_rgba(0,30,55,.16)] backdrop-blur-md md:mt-7">
+        <Brand light /><nav className="hidden items-center gap-7 font-sans text-[14px] md:flex"><a href="#how">How it works</a><a href="#questions">Questions</a><Link href="/login">Sign in</Link></nav><StartButton />
+      </header>
+      <div className="relative z-10 mx-auto flex max-w-4xl flex-col items-center px-5 pb-24 pt-24 text-center text-white md:pt-28">
+        <h1 className="max-w-4xl font-serif text-[clamp(52px,8vw,104px)] leading-[.9] tracking-[-0.06em]">Describe your idea<br /><em className="font-serif font-normal">and watch it become a real app.</em></h1>
+        <p className="mt-9 max-w-[520px] text-[17px] leading-7 text-white/85">Describe it in plain words. Sizzer plans it with you, then builds the full app, database included.</p>
+        <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row"><StartButton /><button onClick={() => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" })} className="rounded-full bg-white px-7 py-3 text-[14px] font-medium text-[#17202b] transition hover:bg-white/90">See how it works</button></div>
+      </div><div className="pointer-events-none absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/10 to-transparent" />
+    </section>
+
+    <section id="how" className="mx-auto max-w-[965px] overflow-visible px-6 py-28 text-center md:py-36"><p className="relative z-10 mb-7 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#7a858a]">How it builds</p><h2 className="relative z-10 mx-auto max-w-4xl text-[clamp(44px,7vw,78px)] leading-[.94] tracking-[-0.065em]">Describe <BlurredStagger text={["a habit tracker", "an online store", "a portfolio site", "a SaaS product"]} repeat repeatDelay={3200} className="font-script inline-block italic text-sky-400" /><br />and keep every line it writes.</h2><div className="relative z-0 mx-auto mt-[-42px] max-w-[1100px] overflow-hidden"><img src={HERO} alt="Balloon meadow" className="h-[525px] w-full object-cover object-center" /><div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#fafbf8_0%,rgba(250,251,248,.88)_5%,transparent_18%,transparent_82%,rgba(250,251,248,.88)_95%,#fafbf8_100%)]" /><div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,#fafbf8_0%,transparent_12%,transparent_78%,rgba(250,251,248,.72)_96%,#fafbf8_100%)]" /></div><p className="relative z-10 mx-auto mt-[-2px] max-w-[440px] text-[16px] leading-7 text-[#768087]">Plain words in, a working app out: screens, a server, and a database that belong to you.</p></section>
+
+    <section className="mx-auto max-w-[965px] border-y border-[#dfe5e4] px-6 py-20 text-center"><p className="mx-auto max-w-[470px] text-[17px] leading-8 text-[#69747a]">Plain words in, a working app out: screens, a server and a real database. It checks each change in a browser before you see it.</p><div className="mt-16 border-t border-[#dfe5e4] pt-9"><p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#7a858a]">Any stack you name</p><div className="mt-5 flex flex-wrap justify-center gap-x-7 gap-y-3 text-[18px] text-[#747d82]"><span>React</span><span>Next.js</span><span>Vue</span><span>REST API</span><span>Django</span><span>Express</span><span>Postgres</span><span>MongoDB</span><span>and more</span></div><p className="mt-10 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#7a858a]">Coming next</p><div className="mt-5 flex flex-wrap justify-center gap-x-8 gap-y-3 text-[18px] text-[#747d82]"><span>Slide decks</span><span>PDFs</span><span>Reports</span><span>Documents</span></div></div></section>
+
+    <section id="questions" className="border-y border-[#dfe5e4] bg-[#f7f8f5] px-6 py-28 md:py-36"><h2 className="mx-auto max-w-3xl text-center text-[clamp(44px,6vw,70px)] leading-[.95] tracking-[-0.065em]">From a sentence<br />to a running app.</h2><p className="mx-auto mt-6 max-w-xl text-center text-[16px] leading-7 text-[#69747a]">Sizzer is an AI website builder that turns your idea into a planned, working app—with the interface, backend, and database included.</p><div className="mx-auto mt-10 max-w-[1100px] px-2 py-8 sm:px-8"><CardStack items={CARD_ITEMS} initialIndex={1} autoAdvance intervalMs={3000} pauseOnHover showDots cardWidth={350} cardHeight={430} renderCard={(item) => <WebsiteBuilderCard item={item} />} /></div><div className="mt-16 flex justify-center"><button onClick={begin} className="group inline-flex items-center gap-3 rounded-full border border-[#b9c3c4] bg-white px-5 py-2.5 text-[14px] shadow-sm"><span>Start building</span><span className="grid h-7 w-7 place-items-center rounded-full bg-[#eef0ef] transition group-hover:translate-x-0.5"><ArrowUpRight size={15} /></span></button></div></section>
+
+    <section className="relative min-h-[640px] overflow-hidden px-6 py-28 md:py-36"><div className="absolute inset-0 bg-cover bg-center opacity-90" style={{ backgroundImage: `url(${HERO})` }} /><div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,#fafbf8_0%,#fafbf8_28%,rgba(250,251,248,.95)_40%,rgba(250,251,248,.62)_56%,rgba(250,251,248,.16)_72%,transparent_86%)]" /><div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(250,251,248,.18),transparent_20%,transparent_80%,rgba(250,251,248,.18))]" /><div className="relative mx-auto max-w-[900px]"><div className="flex flex-col justify-between gap-12 pt-12 md:flex-row"><div><Brand /><p className="mt-5 max-w-[220px] text-[15px] leading-6 text-[#69747a]">Describe an app. Keep every line of code.</p><p className="mt-10 text-[13px] text-[#69747a]">© 2026 Sizzer. All rights reserved.</p></div><div className="grid grid-cols-2 gap-x-12 gap-y-10 text-[14px] md:grid-cols-4"><div><p className="mb-4 font-semibold">Product</p><a className="block py-1.5 text-[#69747a]" href="#how">How it works</a><a className="block py-1.5 text-[#69747a]" href="#questions">Questions</a></div><div><p className="mb-4 font-semibold">Build</p><Link className="block py-1.5 text-[#69747a]" href="/signup">Start a project</Link><Link className="block py-1.5 text-[#69747a]" href="/dashboard">Your projects</Link></div><div><p className="mb-4 font-semibold">Account</p><Link className="block py-1.5 text-[#69747a]" href="/login">Sign in</Link><Link className="block py-1.5 text-[#69747a]" href="/signup">Create account</Link></div><div><p className="mb-4 font-semibold">More</p><a className="block py-1.5 text-[#69747a]" href="https://github.com/Nitinref/seezer.ai" target="_blank" rel="noreferrer">GitHub</a></div></div></div><div className="pointer-events-none mt-10 select-none text-center text-[clamp(100px,20vw,270px)] font-semibold leading-none tracking-[0.08em] text-sky-900/30">sizzer</div></div></section>
+  </main>;
+}
+

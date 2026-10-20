@@ -3,18 +3,21 @@ import React from "react";
 import { ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types";
+import { PlanCard } from "./PlanCard";
 
 export function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
+
+  if (message.role === "assistant") return <div className="w-full"><PlanCard message={message} /></div>;
 
   return (
     <div className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>
       <div
         className={cn(
-          "rounded-xl px-3 py-2 text-xs max-w-[85%] leading-relaxed",
+          "max-w-[88%] rounded-2xl px-5 py-4 font-sans text-[17px] leading-8 tracking-[-0.01em]",
           isUser
-            ? "bg-gray-800 text-white rounded-br-sm"
-            : "bg-gray-100 border border-gray-300 rounded-bl-sm text-gray-900"
+            ? "rounded-br-md border border-white/[0.08] bg-[#242629] text-white"
+            : "rounded-bl-md border border-white/[0.08] bg-[#1c1d1f] text-white/80"
         )}
       >
         {message.content}

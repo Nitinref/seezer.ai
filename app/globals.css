@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;1,400&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -54,6 +55,22 @@
   ::-webkit-scrollbar        { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track  { background: transparent; }
   ::-webkit-scrollbar-thumb  { background-color: var(--color-border); border-radius: 9999px; }
+}
+
+.font-script {
+  font-family: "Playfair Display", "Iowan Old Style", "Baskerville", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.dashboard-aurora > div:first-child {
+  z-index: 0;
+}
+
+.dashboard-aurora > header,
+.dashboard-aurora > section {
+  position: relative;
+  z-index: 10;
 }
 
 @theme inline {

@@ -17,7 +17,7 @@ function stripMarkdown(raw) {
 // ── Required plan schema ──────────────────────────────────────────────────
 const DEFAULT_PLAN = {
   summary:       'Build the requested application',
-  approach:      'Implement using React + Tailwind in Home.jsx',
+  approach:      'Implement a maintainable React + Tailwind application split across the route page and focused components',
   homeComponent: 'src/pages/Home.jsx',
   files:         [],
   newPages:      [],

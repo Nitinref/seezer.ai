@@ -58,6 +58,11 @@ export type PipelineStage =
   | "validating"
   | "checking"
   | "preview"
+  | "planner"
+  | "builder"
+  | "validator"
+  | "checker"
+  | "tool"
   | "done"
   | "error";
 

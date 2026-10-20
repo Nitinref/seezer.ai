@@ -1,7 +1,7 @@
 import axios, { AxiosError } from "axios";
 import type {
   AuthResponse, Project, ProjectFile, Message,
-  ChatResponse, JobStatus,
+  ChatResponse, JobStatus, PipelineEvent,
 } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -64,11 +64,19 @@ export const projectsApi = {
 
 
 export const chatApi = {
-  send: (projectId: string, message: string) =>
-    apiClient.post<ChatResponse>("/chat", { projectId, message }).then((r) => r.data),
+  latestForProject: (projectId: string) =>
+    apiClient.get<{ chat: { id: string } | null }>(`/chats/project/${projectId}`).then((r) => r.data.chat),
+  send: (projectId: string, message: string) => {
+    const provider = typeof window !== "undefined" ? localStorage.getItem("forge_ai_provider") || undefined : undefined;
+    const model = typeof window !== "undefined" ? localStorage.getItem("forge_ai_model") || undefined : undefined;
+    return apiClient.post<ChatResponse>("/chat", { projectId, message, provider, model }).then((r) => r.data);
+  },
 
   messages: (chatId: string) =>
     apiClient.get<{ messages: Message[] }>(`/chats/${chatId}/messages`).then((r) => r.data.messages),
+
+  pipelineEvents: (chatId: string) =>
+    apiClient.get<{ events: PipelineEvent[] }>(`/chats/${chatId}/events`).then((r) => r.data.events),
 
   jobStatus: (jobId: string) =>
     apiClient.get<JobStatus>(`/chats/jobs/${jobId}`).then((r) => r.data),
