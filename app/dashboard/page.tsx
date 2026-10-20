@@ -58,9 +58,9 @@ function DashboardHome({ onStart, onOpenProject }: { onStart: (prompt: string) =
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#0d0e11] text-white">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#0d0e11] text-white md:flex-row">
       <AceternitySidebar onNewProject={() => setShowExisting(false)} />
-      <main className="dashboard-aurora relative isolate m-2 mt-2 min-w-0 flex-1 overflow-x-hidden overflow-y-auto rounded-t-[26px] border border-white/10 bg-[#07152f] [&>header]:relative [&>header]:z-10 [&>section]:relative [&>section]:z-10">
+      <main className="dashboard-aurora relative isolate m-2 mt-2 min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto rounded-t-[26px] border border-white/10 bg-[#07152f] [&>header]:relative [&>header]:z-10 [&>section]:relative [&>section]:z-10">
         <ShaderBackground className="pointer-events-none absolute inset-0 z-0 h-full w-full" />
         <header className="relative z-10 flex items-center justify-between px-5 py-4 lg:px-8">
           <span className="text-lg font-semibold tracking-[-0.05em] lg:hidden">
@@ -93,21 +93,21 @@ function DashboardHome({ onStart, onOpenProject }: { onStart: (prompt: string) =
             </button>
           </section>
         ) : (
-          <section className="min-h-[calc(100vh-72px)] bg-transparent px-8 py-12 text-left xl:px-16">
+          <section className="min-h-[calc(100vh-72px)] bg-transparent px-4 py-8 text-left sm:px-8 sm:py-12 xl:px-16">
             <div className="mx-auto max-w-[1280px]">
-              <div className="flex items-start justify-between gap-6">
+              <div className="flex flex-col items-start justify-between gap-5 sm:flex-row sm:gap-6">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-[0.16em] text-sky-400">
                     Your workspace
                   </p>
-                  <h1 className="mt-7 text-5xl font-light tracking-[-0.06em] text-white sm:text-6xl">
+                  <h1 className="mt-4 text-4xl font-light tracking-[-0.06em] text-white sm:mt-7 sm:text-6xl">
                     Made by you.
                   </h1>
                   <p className="mt-4 text-lg text-white/45">
                     Your projects, ready to pick up again.
                   </p>
                 </div>
-                <div className="mt-8 flex items-center gap-3">
+                <div className="flex w-full items-center gap-3 sm:mt-8 sm:w-auto">
                   <button
                     type="button"
                     onClick={() => setShowExisting(false)}
@@ -174,7 +174,7 @@ function DashboardHome({ onStart, onOpenProject }: { onStart: (prompt: string) =
                               deleteMutation.mutate(project.id);
                             }
                           }}
-                          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white/30 opacity-0 transition hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100"
+                          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white/30 opacity-100 transition hover:bg-red-500/15 hover:text-red-300 sm:opacity-0 sm:group-hover:opacity-100"
                         >
                           <Trash2 size={16} />
                         </button>

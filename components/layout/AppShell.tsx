@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Code2, Globe2, MoreHorizontal, Plus, Rocket } from "lucide-react";
+import { Code2, Globe2, MessageSquare, MoreHorizontal, Plus, Rocket } from "lucide-react";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { CenterPanel } from "@/components/preview/CenterPanel";
 import { useAppStore } from "@/store/appStore";
 
 export function AppShell({ initialPrompt }: { initialPrompt?: string }) {
   const [previewWidth, setPreviewWidth] = useState(70);
+  const [mobilePanel, setMobilePanel] = useState<"chat" | "preview">("chat");
   const dragging = useRef(false);
   const { activeProject, activeTab, setActiveTab } = useAppStore();
 
@@ -42,7 +43,7 @@ export function AppShell({ initialPrompt }: { initialPrompt?: string }) {
 
   return (
     <div className="flex h-screen w-full max-w-full flex-col overflow-hidden bg-[#151515] text-white">
-      <header className="flex h-[62px] shrink-0 border-b border-white/[0.1] bg-[#101011]">
+      <header className="hidden h-[62px] shrink-0 border-b border-white/[0.1] bg-[#101011] md:flex">
         <div
           className="flex min-w-0 items-center border-r border-white/[0.1] px-5"
           style={{ width: `${100 - previewWidth}%` }}
@@ -70,8 +71,57 @@ export function AppShell({ initialPrompt }: { initialPrompt?: string }) {
           </button>
         </div>
       </header>
-      <div id="app-workspace" className="flex min-h-0 flex-1 overflow-hidden bg-[#171717]">
-        <div className="min-w-0 h-full" style={{ width: `${100 - previewWidth}%` }}>
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-white/[0.1] bg-[#101011] px-3 md:hidden">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
+          {activeProject?.name ?? "New project"}
+        </span>
+        <button
+          type="button"
+          onClick={() => setMobilePanel("chat")}
+          aria-pressed={mobilePanel === "chat"}
+          className={`flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${
+            mobilePanel === "chat" ? "bg-white/10 text-white" : "text-white/55"
+          }`}
+        >
+          <MessageSquare size={15} /> Chat
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMobilePanel("preview");
+            setActiveTab("preview");
+          }}
+          aria-pressed={mobilePanel === "preview" && activeTab === "preview"}
+          className={`flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${
+            mobilePanel === "preview" && activeTab === "preview"
+              ? "bg-white/10 text-white"
+              : "text-white/55"
+          }`}
+        >
+          <Globe2 size={15} /> Preview
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMobilePanel("preview");
+            setActiveTab("code");
+          }}
+          aria-pressed={mobilePanel === "preview" && activeTab === "code"}
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+            mobilePanel === "preview" && activeTab === "code"
+              ? "bg-white/10 text-white"
+              : "text-white/55"
+          }`}
+          aria-label="Show code"
+        >
+          <Code2 size={16} />
+        </button>
+      </header>
+      <div id="app-workspace" className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#171717] md:flex-row">
+        <div
+          className={`${mobilePanel === "chat" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 md:block md:h-full md:flex-none md:w-[var(--chat-width)]`}
+          style={{ "--chat-width": `${100 - previewWidth}%` } as React.CSSProperties}
+        >
           <ChatPanel initialPrompt={initialPrompt} />
         </div>
         <div
@@ -85,7 +135,9 @@ export function AppShell({ initialPrompt }: { initialPrompt?: string }) {
           className="group z-20 hidden w-1 shrink-0 cursor-col-resize border-l border-white/[0.08] bg-[#050505] hover:border-white/30 md:block"
           title="Drag to resize preview"
         />
-        <div className="min-w-0 h-full flex-1">
+        <div
+          className={`${mobilePanel === "preview" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 md:block md:h-full`}
+        >
           <CenterPanel />
         </div>
       </div>

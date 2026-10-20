@@ -1,19 +1,35 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { BrainCircuit, Check, ChevronDown, CircleAlert, Copy, FileCode2, Globe2, Search, TerminalSquare, Wrench } from "lucide-react";
+import { BrainCircuit, Check, ChevronDown, ChevronRight, CircleAlert, Copy, FileCode2, Globe2, Search, TerminalSquare, Wrench } from "lucide-react";
 import type { PipelineEvent, TokenSummary } from "@/types";
 import { cn } from "@/lib/utils";
 
-type Activity = { event: PipelineEvent; title: string; detail?: string; payload?: Record<string, unknown>; kind: "agent" | "thought" | "tool" | "status" | "error" | "preview" };
+type Activity = { event: PipelineEvent; title: string; displayTitle?: string; detail?: string; payload?: Record<string, unknown>; kind: "agent" | "thought" | "tool" | "status" | "error" | "preview" };
 
 function json(value: unknown) { try { return JSON.stringify(value); } catch { return String(value); } }
+
+function humanizeToolName(name: string) {
+  const labels: Record<string, string> = {
+    create_file: "Created a file",
+    delete_file: "Removed a file",
+    edit_files: "Updated project files",
+    execute_command: "Ran a command",
+    list_directory: "Checked project files",
+    read_file: "Read a project file",
+    read_multiple_files: "Read project files",
+    verify_project: "Verified the project",
+    write_multiple_files: "Wrote project files",
+  };
+  return labels[name] ?? name.replaceAll("_", " ");
+}
 
 function toolActivity(event: PipelineEvent): Activity {
   try {
     const value = JSON.parse(event.message ?? "{}");
     const detail = [value.args, value.changed_files, value.files, value.success].filter((item) => item !== undefined).map(json).join("  ");
-    return { event, title: String(value.kind ?? "tool"), detail, payload: value, kind: "tool" };
+    const title = String(value.kind ?? "tool");
+    return { event, title, displayTitle: humanizeToolName(title), detail, payload: value, kind: "tool" };
   } catch { return { event, title: "tool", detail: event.message, kind: "tool" }; }
 }
 
@@ -28,8 +44,15 @@ function toActivity(event: PipelineEvent): Activity | null {
   if (event.stage === "error") return { event, title: message, kind: "error" };
   if (["planner", "builder", "validator", "checker"].includes(event.stage ?? "")) {
     if (message === "✅ Tool completed") return null;
-    if (message.startsWith("🔧 Calling tool:")) return { event, title: message.replace("🔧 Calling tool: ", ""), detail: event.stage, kind: "tool" };
-    return { event, title: message.replace(/^📍\s*/, ""), detail: event.stage, kind: event.stage === "planner" ? "thought" : "agent" };
+    if (message.startsWith("🔧 Calling tool:")) {
+      const title = message.replace("🔧 Calling tool: ", "");
+      return { event, title, displayTitle: humanizeToolName(title), detail: event.stage, kind: "tool" };
+    }
+    const title = message.replace(/^📍\s*/, "");
+    const displayTitle = title
+      .replace(/LangGraph node\s*→\s*agent/i, "Considering the next step")
+      .replace(/LangGraph node\s*→\s*tools/i, "Choosing the right tool");
+    return { event, title, displayTitle, detail: event.stage, kind: event.stage === "planner" ? "thought" : "agent" };
   }
   return { event, title: message, detail: event.stage, kind: "status" };
 }
@@ -51,29 +74,72 @@ function ActivityIcon({ item }: { item: Activity }) {
 }
 
 export function AgentTerminal({ events, tokens }: { events: PipelineEvent[]; tokens?: TokenSummary }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const activities = useMemo(() => events.filter((event) => event.type === "pipeline_update").map(toActivity).filter(Boolean) as Activity[], [events]);
   if (!activities.length) return null;
 
   const first = activities[0].event.ts;
   const last = activities[activities.length - 1].event.ts;
-  const active = !activities.some((item) => item.event.stage === "done" || item.event.stage === "error");
+  const failed = activities.some((item) => item.event.stage === "error");
+  const active = !failed && !activities.some((item) => item.event.stage === "done");
   const seconds = Math.max(0, Math.round((last - first) / 1000));
-
   const outputTokens = tokens?.total?.output;
+  const latestActivity = activities.at(-1);
+  const latestMessage = latestActivity?.event.message
+    ?.replace(/^📍\s*/, "")
+    .replace(/^🔧 Calling tool:\s*/, "");
+  const progressMessage = latestActivity?.kind === "tool"
+    ? latestActivity.title.includes("read")
+      ? "I’m reviewing your project files."
+      : latestActivity.title.includes("execute") || latestActivity.title.includes("verify")
+        ? "I’m running checks on your project."
+        : "I’m writing and updating your project files."
+    : latestActivity?.event.stage === "checking"
+      ? "I’m checking that your app builds and runs correctly."
+      : latestActivity?.event.stage === "planning"
+        ? "I’m planning the structure of your app."
+        : latestMessage;
+  const assistantMessage = failed
+    ? "The build ran into an issue. Open the activity details to see what happened."
+    : active
+      ? progressMessage
+        ?.replace(/LangGraph node\s*→\s*agent/i, "I’m working through the next step.")
+        .replace(/LangGraph node\s*→\s*tools/i, "I’m selecting the right tool for the job.")
+        ?? "I’m working on your app now."
+      : "Your app is built. I’ve finished the available checks.";
+  const duration = seconds < 60
+    ? `${seconds}s`
+    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 
   return (
-    <section className="mx-1 rounded-2xl border border-white/[0.08] bg-[#090a0b] px-4 py-3 font-sans tracking-[-0.01em] shadow-[inset_0_1px_0_rgba(255,255,255,.02)]">
-      <button onClick={() => setExpanded((value) => !value)} className="flex w-full items-center gap-2 px-1 py-2 text-left text-[15px] leading-6 text-white/60 hover:text-white">
-        <ChevronDown size={14} className={!expanded ? "-rotate-90 transition-transform" : "transition-transform"} />
-        <span>{active ? "Thoughts" : "Edited files, ran commands, created files"}</span>
-        {outputTokens !== undefined && <span className="rounded border border-emerald-400/30 px-1.5 py-0.5 text-[12px] text-emerald-300">+{outputTokens.toLocaleString()}</span>}
-        <span className="ml-auto text-white/35">•••</span>
-      </button>
-      {expanded && <div className="ml-1">
-        {activities.map((item, index) => <ActivityRow key={`${item.event.ts}-${index}`} item={item} />)}
-        {active && <div className="mt-1 h-4 w-1.5 animate-pulse bg-white/60" />}
-      </div>}
+    <section className="mx-1 font-sans tracking-[-0.01em]">
+      <div className="flex items-start gap-3">
+        <div className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full border border-sky-300/20 bg-sky-400/10">
+          <BrainCircuit size={15} className={active ? "text-sky-300 animate-pulse" : "text-sky-300"} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className={cn("text-[15px] leading-7", failed ? "text-red-300" : "text-white/80")}>
+            {assistantMessage}
+          </p>
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+            className="mt-2 flex w-full items-center gap-2 border-t border-white/[0.08] py-3 text-left text-[13px] text-white/50 transition hover:text-white/80"
+          >
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span>{active ? `Build activity · ${activities.length} updates` : `Completed in ${duration}`}</span>
+            {outputTokens !== undefined && <span className="text-emerald-300/80">+{outputTokens.toLocaleString()} tokens</span>}
+          </button>
+          {expanded && <div className="ml-1 border-l border-white/[0.1] pl-4">
+            {activities.map((item, index) => <ActivityRow key={`${item.event.ts}-${index}`} item={item} />)}
+            {active && <div className="mt-2 flex items-center gap-2 py-1 text-[13px] text-white/40">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300" />
+              Working on your app…
+            </div>}
+          </div>}
+        </div>
+      </div>
     </section>
   );
 }
@@ -130,7 +196,7 @@ function ActivityRow({ item }: { item: Activity }) {
   return <div className="group flex gap-2 py-1.5 text-[15px] leading-7">
           <div className="mt-0.5 shrink-0"><ActivityIcon item={item} /></div>
           <div className={item.kind === "error" ? "min-w-0 text-red-300" : "min-w-0 text-white/65"} title={item.detail}>
-            <div className="truncate">{item.title}</div>
+            <div className="truncate">{item.displayTitle ?? item.title}</div>
             {item.event.previewUrl && <a href={item.event.previewUrl} target="_blank" rel="noreferrer" className="block text-[13px] text-sky-300 hover:text-sky-200">Open preview</a>}
           </div>
         </div>;
