@@ -29,32 +29,6 @@ import { runCheckerAgent } from '../agents/checkerAgent.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function fallbackHomeForRequest(userMessage = '') {
-  const train = /train|railway|rail|ticket|journey/i.test(userMessage);
-  if (train) return `import React from 'react';
-
-const routes = [
-  { from: 'New Delhi', to: 'Mumbai Central', time: '16h 20m', price: '₹1,299' },
-  { from: 'Bengaluru', to: 'Chennai Central', time: '5h 10m', price: '₹699' },
-  { from: 'Kolkata', to: 'Varanasi', time: '9h 45m', price: '₹899' },
-];
-
-export default function Home() {
-  return <main className="min-h-screen bg-slate-950 text-white">
-    <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-      <div className="flex items-center gap-2 text-xl font-bold"><span className="rounded-lg bg-orange-500 px-2 py-1">R</span> Railly</div>
-      <div className="hidden gap-8 text-sm text-slate-300 md:flex"><a href="#search">Search trains</a><a href="#routes">Popular routes</a><a href="#offers">Offers</a></div>
-      <button className="rounded-full border border-slate-700 px-4 py-2 text-sm">Sign in</button>
-    </nav>
-    <section id="search" className="mx-auto max-w-6xl px-6 pb-16 pt-14">
-      <div className="max-w-3xl"><p className="mb-4 text-sm font-semibold uppercase tracking-[0.25em] text-orange-400">Travel smarter</p><h1 className="text-5xl font-black leading-tight md:text-7xl">Every journey starts with a better ticket.</h1><p className="mt-6 max-w-xl text-lg text-slate-400">Find comfortable trains, compare fares, and book your next journey in seconds.</p></div>
-      <div className="mt-12 rounded-3xl bg-white p-3 text-slate-900 shadow-2xl shadow-orange-950/30 md:p-5"><div className="grid gap-3 md:grid-cols-[1fr_1fr_180px_auto] md:items-end"><label className="rounded-2xl bg-slate-100 p-4 text-xs text-slate-500">FROM<input className="mt-2 block w-full bg-transparent text-base font-semibold outline-none" placeholder="Departure station" /></label><label className="rounded-2xl bg-slate-100 p-4 text-xs text-slate-500">TO<input className="mt-2 block w-full bg-transparent text-base font-semibold outline-none" placeholder="Arrival station" /></label><label className="rounded-2xl bg-slate-100 p-4 text-xs text-slate-500">DATE<input className="mt-2 block w-full bg-transparent text-base font-semibold outline-none" type="date" /></label><button className="rounded-2xl bg-orange-500 px-7 py-4 font-bold text-white hover:bg-orange-600">Search trains</button></div></div>
-    </section>
-    <section id="routes" className="mx-auto max-w-6xl px-6 pb-20"><div className="mb-6 flex items-end justify-between"><div><p className="text-sm text-orange-400">Popular journeys</p><h2 className="mt-2 text-3xl font-bold">Go further for less</h2></div><a href="#search" className="text-sm text-slate-400">View all routes →</a></div><div className="grid gap-4 md:grid-cols-3">{routes.map((route) => <article key={route.from} className="rounded-3xl border border-slate-800 bg-slate-900 p-5"><div className="mb-8 flex items-center justify-between text-sm text-slate-400"><span>Direct route</span><span>●</span></div><h3 className="text-lg font-semibold">{route.from}</h3><div className="my-2 text-orange-400">↓</div><h3 className="text-lg font-semibold">{route.to}</h3><div className="mt-6 flex justify-between border-t border-slate-800 pt-4 text-sm text-slate-400"><span>{route.time}</span><b className="text-white">from {route.price}</b></div></article>)}</div></section>
-  </main>;`;
-  return `export default function Home() { return <main className="min-h-screen bg-slate-950 p-12 text-white"><h1 className="text-5xl font-bold">${userMessage.replace(/[$`\\]/g, '').slice(0, 80)}</h1><p className="mt-4 text-slate-400">Your new experience starts here.</p></main>; }`;
-}
-
 function fallbackPlanForRequest(prompt = '') {
   const train = /train|railway|rail|ticket|journey/i.test(prompt);
   if (train) {
@@ -464,7 +438,7 @@ export default defineConfig({
     // Keep Builder focused on reading and writing the app. Shell/build/browser
     // checks consume free-model steps and are handled by the Checker.
     const builderTools = lcTools.filter((t) =>
-      ['read_file', 'read_multiple_files', 'edit_files', 'create_file', 'write_multiple_files', 'delete_file', 'list_directory', 'get_context', 'save_context'].includes(t.name)
+      ['read_file', 'read_multiple_files', 'edit_files', 'create_file', 'write_multiple_files', 'delete_file'].includes(t.name)
     );
     const builderWriteTools = lcTools.filter((t) =>
       ['edit_files', 'create_file', 'write_multiple_files', 'delete_file'].includes(t.name)
@@ -587,26 +561,19 @@ export default defineConfig({
       const resumeBuilder = hasCheckpoint('built') && !isReplan;
       if (!resumeBuilder) {
       await emit(chatId, 'building',
-        isReplan ? 'Rebuilding with revised plan…' : 'Writing code and assembling components…'
+        isReplan ? 'Rebuilding with revised plan…' : 'Implementing the planned files…'
       );
       logger.startStage('BuilderAgent');
 
       try {
-        await withRetry(
+        let buildResult = await withRetry(
           () => runBuilderAgent({ plan: planObj, userMessage: fullPrompt, tools: builderTools ,emit,chatId,modelOptions}),
           1, 'BuilderAgent'
         );
 
-        // A model can return a normal-looking completion without making a
-        // tool call. Never mark that as a successful build while the scaffold
-        // placeholder is still the homepage; give it one focused write turn.
-        const homeAfterBuild = await sb.files.read('/app/src/pages/Home.jsx');
-        if (homeAfterBuild.includes('Ready to build')) {
-          await emit(chatId, 'building', 'Builder returned without writing the homepage; retrying focused file generation…');
-          await withRetry(
-            // Keep the configured Builder provider/model for repair. Forcing
-            // the validator's Groq model can hit a small output quota before
-            // it gets a chance to call a file-writing tool.
+        if (!buildResult.wroteFiles) {
+          await emit(chatId, 'building', 'The builder inspected the project but did not write files. Retrying with a write-only pass…');
+          buildResult = await withRetry(
             () => runBuilderAgent({
               plan: planObj,
               userMessage: fullPrompt,
@@ -618,23 +585,15 @@ export default defineConfig({
             }),
             0, 'BuilderRepair'
           );
-          const repairedHome = await sb.files.read('/app/src/pages/Home.jsx');
-          if (repairedHome.includes('Ready to build')) {
-            await sb.files.write('/app/src/pages/Home.jsx', fallbackHomeForRequest(userMessage));
-            await emit(chatId, 'building', 'Generated a local starter homepage while the AI write step was unavailable.');
-          }
+        }
+        if (!buildResult.wroteFiles) {
+          throw new Error('Builder completed without writing any project files after the write-only retry.');
         }
         logger.endStage('BuilderAgent');
       } catch (err) {
-        if (String(err?.message ?? '').includes('BuilderRepair')) {
-          await sb.files.write('/app/src/pages/Home.jsx', fallbackHomeForRequest(userMessage));
-          await emit(chatId, 'building', 'Generated a local starter homepage while the AI write step was unavailable.');
-          logger.endStage('BuilderAgent', { fallback: true });
-        } else {
         logger.error('BuilderAgent', err);
         logger.endStage('BuilderAgent', { errorType: 'unknown' });
         throw err;
-        }
       }
 
       await job.updateProgress({ percent: 55 + replanCount * 5, stage: 'built' });
