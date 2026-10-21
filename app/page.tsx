@@ -31,7 +31,7 @@ function Brand({ light = false }: { light?: boolean }) {
 function StartButton() {
   const router = useRouter();
   const { token } = useAuthStore();
-  return <button onClick={() => router.push(token ? "/dashboard" : "/signup")} className="group inline-flex items-center gap-3 rounded-full border border-white/40 bg-white/[0.12] px-5 py-2.5 font-sans text-[14px] font-medium text-white backdrop-blur-md transition hover:bg-white/20"><span>Start building</span><span className="grid h-7 w-7 place-items-center rounded-full bg-white/15 transition group-hover:translate-x-0.5"><ArrowUpRight size={15} /></span></button>;
+  return <button onClick={() => router.push(token ? "/dashboard" : "/signup")} className="group inline-flex items-center gap-3 rounded-full border border-white/45 bg-white/[0.16] px-7 py-3.5 font-sans text-[16px] font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,.28)] backdrop-blur-2xl backdrop-saturate-150 transition hover:bg-white/[0.24]"><span>Start building</span><span className="grid h-8 w-8 place-items-center rounded-full bg-white/15 transition group-hover:translate-x-0.5"><ArrowUpRight size={17} /></span></button>;
 }
 
 export default function LandingPage() {
@@ -42,13 +42,13 @@ export default function LandingPage() {
   return <main className="min-h-screen overflow-hidden bg-[#fafbf8] text-[#17202b]">
     <section className="relative min-h-screen overflow-hidden bg-[#28729a]">
       <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `linear-gradient(180deg, rgba(14,74,107,.35), rgba(12,66,84,.18) 48%, rgba(12,55,37,.25)), url(${HERO})` }} />
-      <header className="relative z-10 mx-auto flex max-w-[760px] items-center justify-between rounded-full border border-white/45 bg-[#3784ad]/65 px-5 py-2.5 text-white shadow-[0_12px_35px_rgba(0,30,55,.16)] backdrop-blur-md md:mt-7">
+      <header className="relative z-10 mx-auto flex max-w-[760px] items-center justify-between rounded-full border border-white/45 bg-white/[0.14] px-5 py-2.5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.32),0_16px_40px_rgba(0,30,55,.18)] backdrop-blur-2xl backdrop-saturate-150 md:mt-7">
         <Brand light /><nav className="hidden items-center gap-7 font-sans text-[14px] md:flex"><a href="#how">How it works</a><a href="#questions">Questions</a><Link href="/login">Sign in</Link></nav><StartButton />
       </header>
       <div className="relative z-10 mx-auto flex max-w-4xl flex-col items-center px-5 pb-24 pt-24 text-center text-white md:pt-28">
         <h1 className="max-w-4xl font-serif text-[clamp(52px,8vw,104px)] leading-[.9] tracking-[-0.06em]">Describe your idea<br /><em className="font-serif font-normal">and watch it become a real app.</em></h1>
         <p className="mt-9 max-w-[520px] text-[17px] leading-7 text-white/85">Describe it in plain words. Sizzer plans it with you, then builds the full app, database included.</p>
-        <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row"><StartButton /><button onClick={() => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" })} className="rounded-full bg-white px-7 py-3 text-[14px] font-medium text-[#17202b] transition hover:bg-white/90">See how it works</button></div>
+        <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row"><StartButton /><button onClick={() => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" })} className="rounded-full bg-white px-9 py-4 text-[16px] font-medium text-[#17202b] transition hover:bg-white/90">See how it works</button></div>
       </div><div className="pointer-events-none absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/10 to-transparent" />
     </section>
 

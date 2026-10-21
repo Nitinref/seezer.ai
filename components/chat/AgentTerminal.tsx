@@ -22,6 +22,7 @@ import {
 import type { PipelineEvent } from "@/types";
 import { cn } from "@/lib/utils";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
+import SpringDotMatrix from "@/components/ui/spring-dot-matrix";
 import {
   Terminal as TerminalElement,
   TerminalContent,
@@ -1007,17 +1008,19 @@ export function AgentTerminal({
               const isLastItem = index === displayRows.length - 1;
               if (Array.isArray(row)) {
                 return (
-                  <React.Fragment key={`read-files-${row[0]?.event.ts ?? index}`}>
+                  <div key={`read-files-${row[0]?.event.ts ?? index}`} className="relative pl-10">
+                    <span className="dark absolute left-0 top-2 scale-[0.48] origin-top-left" aria-hidden="true"><SpringDotMatrix /></span>
                     {index === firstToolRow && <ActivityGroupHeader />}
                     <ReadFilesGroup items={row} />
-                  </React.Fragment>
+                  </div>
                 );
               }
               return (
-                <React.Fragment key={`${row.event.ts}-${index}`}>
+                <div key={`${row.event.ts}-${index}`} className="relative pl-10">
+                  <span className="dark absolute left-0 top-2 scale-[0.48] origin-top-left" aria-hidden="true"><SpringDotMatrix /></span>
                   {index === firstToolRow && <ActivityGroupHeader />}
                   <ActivityRow item={row} isRunning={active && isLastItem} />
-                </React.Fragment>
+                </div>
               );
             })}
           </div>

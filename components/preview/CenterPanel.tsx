@@ -1,9 +1,10 @@
 "use client";
 
 import React from "react";
-import { ArrowLeft, ArrowRight, Code2, ExternalLink, Gift, Monitor, RefreshCw, Smartphone, Zap } from "lucide-react";
+import { ArrowLeft, ArrowRight, Code2, ExternalLink, Gift, RefreshCw, Smartphone } from "lucide-react";
 import { useAppStore } from "@/store/appStore";
 import { CodeViewer } from "./CodeViewer";
+import LiquidWaveSpinner from "@/components/ui/spinner-10";
 
 export function CenterPanel() {
   const { activeTab, setActiveTab, previewUrl, isBuilding, buildProgress, pipelineEvents } = useAppStore();
@@ -42,9 +43,9 @@ export function CenterPanel() {
           <div className="absolute bottom-7 flex gap-8 text-blue-400"><span>◉ Help Center</span><span>♣ Join our Community</span></div>
         </div>}
 
-        {isBuilding && activeTab === "preview" && <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#050505]/90 backdrop-blur-sm">
-          <Zap size={24} className="animate-pulse text-white/55" />
-          <p className="text-sm text-white/65">{stage || "Building"} · {buildProgress}%</p>
+        {isBuilding && activeTab === "preview" && <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#050505]/90 px-6 backdrop-blur-sm">
+          <LiquidWaveSpinner size="lg" className="max-w-sm bg-transparent" />
+          <p className="mt-2 text-sm text-white/65">{stage || "Building"} · {buildProgress}%</p>
         </div>}
       </div>
     </main>
