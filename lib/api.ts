@@ -80,4 +80,7 @@ export const chatApi = {
 
   jobStatus: (jobId: string) =>
     apiClient.get<JobStatus>(`/chats/jobs/${jobId}`).then((r) => r.data),
+
+  cancel: (jobId: string) =>
+    apiClient.post<{ jobId: string; state: string }>(`/chats/jobs/${jobId}/cancel`).then((r) => r.data),
 };

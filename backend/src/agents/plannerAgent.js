@@ -23,7 +23,10 @@ export async function runPlannerAgent({
   chatId,
   modelOptions = {}
 }){
-  const model = makeModel('planner', 0, 1024, modelOptions);
+  // A plan with files, steps, and descriptions is often cut off at 1024
+  // tokens, which then falls back to a generic template. Leave room for the
+  // planner's real JSON response.
+  const model = makeModel('planner', 0, 2048, modelOptions);
 
   const result = await Promise.race([
     model.invoke([

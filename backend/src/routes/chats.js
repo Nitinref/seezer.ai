@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import prisma from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
-import { enqueueBuildJob, getJobStatus } from '../services/pipeLineService.js';
+import { enqueueBuildJob, getJobStatus, cancelBuildJob } from '../services/pipeLineService.js';
+import { buildQueue } from '../queues/buildQueue.js';
 
 const router = Router();
 
@@ -66,6 +67,26 @@ router.get('/jobs/:jobId', authenticate, async (req, res) => {
   } catch (err) {
     console.error('[chat/job-status]', err);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /chats/jobs/:jobId/cancel — stop a queued or in-progress build.
+router.post('/jobs/:jobId/cancel', authenticate, async (req, res) => {
+  try {
+    const job = await buildQueue.getJob(req.params.jobId);
+    const ownedProjectId = job?.data?.projectId;
+    if (!ownedProjectId) return res.status(404).json({ error: 'Build job not found' });
+
+    const project = await prisma.project.findFirst({
+      where: { id: ownedProjectId, userId: req.user.id },
+      select: { id: true },
+    });
+    if (!project) return res.status(404).json({ error: 'Build job not found' });
+
+    return res.json(await cancelBuildJob(req.params.jobId));
+  } catch (err) {
+    console.error('[chat/cancel]', err);
+    return res.status(500).json({ error: 'Unable to stop build' });
   }
 });
 

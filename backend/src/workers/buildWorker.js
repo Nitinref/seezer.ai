@@ -29,6 +29,15 @@ import { runCheckerAgent } from '../agents/checkerAgent.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+async function throwIfBuildStopped(job) {
+  const stopped = await bullConnection.get(`build:cancel:${job.id}`);
+  if (stopped) {
+    const error = new Error('Work stopped by user.');
+    error.code = 'BUILD_STOPPED';
+    throw error;
+  }
+}
+
 function fallbackPlanForRequest(prompt = '') {
   const train = /train|railway|rail|ticket|journey/i.test(prompt);
   if (train) {
@@ -154,15 +163,26 @@ async function scaffoldReactApp(sb, chatId) {
   await sb.files.write('/app/src/pages/Home.jsx',
     'export default function Home() { return <div className="min-h-screen flex items-center justify-center bg-gray-50"><h1 className="text-2xl font-bold text-gray-800">Ready to build…</h1></div>; }\n');
 
+  const scaffoldFiles = [
+    '/app/package.json', '/app/vite.config.js', '/app/index.html', '/app/src/main.jsx',
+    '/app/tailwind.config.js', '/app/postcss.config.js', '/app/src/index.css',
+    '/app/src/App.jsx', '/app/src/pages/Home.jsx',
+  ];
+  const scaffoldFileChanges = await Promise.all(scaffoldFiles.map(async (path) => {
+    const content = await sb.files.read(path);
+    return {
+      path,
+      additions: content === '' ? 0 : content.split('\n').length,
+      deletions: 0,
+    };
+  }));
+
   await emit(chatId, 'tool', JSON.stringify({
     version: 1,
     kind: 'write_multiple_files',
     ok: true,
-    files: [
-      '/app/package.json', '/app/vite.config.js', '/app/index.html', '/app/src/main.jsx',
-      '/app/tailwind.config.js', '/app/postcss.config.js', '/app/src/index.css',
-      '/app/src/App.jsx', '/app/src/pages/Home.jsx',
-    ],
+    files: scaffoldFiles,
+    file_changes: scaffoldFileChanges,
     file_count: 9,
     phase: 'scaffold',
     args: { cwd: '/app' },
@@ -199,6 +219,15 @@ function publicToolDetails(name, result) {
       details.file_count = details.files.length;
       details.additions = value.results.reduce((sum, file) => sum + Number(file?.additions ?? 0), 0);
       details.deletions = value.results.reduce((sum, file) => sum + Number(file?.deletions ?? 0), 0);
+      // Preserve individual file counts for the activity timeline. Aggregate
+      // values alone make every row appear as +0 -0 after a multi-file write.
+      details.file_changes = value.results
+        .filter((file) => file && typeof file === 'object' && typeof file.path === 'string')
+        .map((file) => ({
+          path: file.path,
+          additions: Number(file.additions ?? 0),
+          deletions: Number(file.deletions ?? 0),
+        }));
     }
     if (typeof value.path === 'string') {
       details.files = [value.path];
@@ -209,6 +238,17 @@ function publicToolDetails(name, result) {
     if (value.build && typeof value.build.exitCode === 'number') details.build_exit_code = value.build.exitCode;
     if (value.lint && typeof value.lint.exitCode === 'number') details.lint_exit_code = value.lint.exitCode;
     if (typeof value.error === 'string') details.error = value.error.slice(0, 400);
+    const output = [];
+    if (value.build && typeof value.build === 'object') {
+      output.push(`> npm run build\n${value.build.stdout ?? ''}${value.build.stderr ? `\n${value.build.stderr}` : ''}`);
+    }
+    if (value.lint && typeof value.lint === 'object' && !value.lint.skipped) {
+      output.push(`> npm run lint --if-present\n${value.lint.stdout ?? ''}${value.lint.stderr ? `\n${value.lint.stderr}` : ''}`);
+    }
+    if (typeof value.stdout === 'string' || typeof value.stderr === 'string') {
+      output.push([value.stdout, value.stderr].filter(Boolean).join('\n'));
+    }
+    if (output.length) details.output = output.join('\n').slice(-20_000);
     if (value._diffs) {
       const diff = typeof value._diffs === 'string' ? value._diffs : JSON.stringify(value._diffs);
       details.diff = diff.slice(0, 20_000);
@@ -368,6 +408,7 @@ async function processBuildJob(job) {
   const hasCheckpoint = (stage) => isRetryResume && (stageRank[resumeStage] || 0) >= stageRank[stage];
   const logger = new PipelineLogger(chatId, job.id);
   logger.startStage('pipeline');
+  await throwIfBuildStopped(job);
 
   try {
     await emit(chatId, 'start', 'Build job received — pipeline starting…');
@@ -475,6 +516,7 @@ export default defineConfig({
     let buildFailed = false;
     let lastError = null;
     let checkOutput = null;
+    let builderSummary = '';
     let planObj = null;
     let previewUrl = null;
 
@@ -489,6 +531,7 @@ export default defineConfig({
     }
 
     do {
+      await throwIfBuildStopped(job);
       buildFailed = false;
       const isReplan = replanCount > 0;
 
@@ -496,6 +539,7 @@ export default defineConfig({
 
       // ── STEP 2: PlannerAgent ──────────────────────────────────────────
       if (!resumePlanner) {
+      await throwIfBuildStopped(job);
       await emit(chatId, 'planning',
         isReplan
           ? `Re-planning after build failure (attempt ${replanCount + 1}/${MAX_REPLANS})…`
@@ -515,6 +559,7 @@ export default defineConfig({
   chatId,
   modelOptions
 }), 1, 'PlannerAgent');
+        await throwIfBuildStopped(job);
 
         // Some OpenRouter responses complete successfully but contain no
         // text. Retry once with a very explicit JSON-only instruction.
@@ -542,7 +587,7 @@ export default defineConfig({
 
       if (!hasUsablePlan) {
         logger._log('warn', 'PlannerAgent returned no usable plan', { planError, responseChars: String(planOutput ?? '').length });
-        await emit(chatId, 'planning', 'Planner response was empty; continuing with the project context.', { plan: planObj });
+        await emit(chatId, 'planning', 'Planner response was empty; continuing with the project context.', { plan: { ...planObj, _fallback: true } });
       } else if (!valid || repaired) {
         logger._log('warn', 'PlannerAgent output repaired', { planError });
         await emit(chatId, 'planning', 'Plan auto-repaired and validated.', { plan: planObj });
@@ -560,6 +605,7 @@ export default defineConfig({
       
       const resumeBuilder = hasCheckpoint('built') && !isReplan;
       if (!resumeBuilder) {
+      await throwIfBuildStopped(job);
       await emit(chatId, 'building',
         isReplan ? 'Rebuilding with revised plan…' : 'Implementing the planned files…'
       );
@@ -570,6 +616,7 @@ export default defineConfig({
           () => runBuilderAgent({ plan: planObj, userMessage: fullPrompt, tools: builderTools ,emit,chatId,modelOptions}),
           1, 'BuilderAgent'
         );
+        await throwIfBuildStopped(job);
 
         if (!buildResult.wroteFiles) {
           await emit(chatId, 'building', 'The builder inspected the project but did not write files. Retrying with a write-only pass…');
@@ -580,6 +627,8 @@ export default defineConfig({
               tools: builderWriteTools,
               emit,
               chatId,
+              // Use the same configured provider for the repair pass. This
+              // keeps builder-provider selection consistent across a job.
               modelOptions,
               repair: true,
             }),
@@ -589,6 +638,7 @@ export default defineConfig({
         if (!buildResult.wroteFiles) {
           throw new Error('Builder completed without writing any project files after the write-only retry.');
         }
+        builderSummary = String(buildResult.output ?? '').trim();
         logger.endStage('BuilderAgent');
       } catch (err) {
         logger.error('BuilderAgent', err);
@@ -604,6 +654,7 @@ export default defineConfig({
 
       // Make the first usable preview available before optional review agents run.
       if (!previewUrl) {
+        await throwIfBuildStopped(job);
         previewUrl = await startPreviewServer(sb, projectId, chatId, logger);
       }
       await syncProjectFiles(sb, projectId, logger);
@@ -612,7 +663,14 @@ export default defineConfig({
       let fastCheckPassed = false;
       try {
         await emit(chatId, 'checking', 'Running fast internal build and lint check…');
-        const fastCheck = JSON.parse(await toolMap.verify_project.execute({}));
+        // The direct deterministic check also needs a timeline event. Without
+        // this, the build runs but its real shell output is invisible in chat.
+        const fastCheckRaw = await toolMap.verify_project.execute({});
+        await emit(chatId, 'tool', JSON.stringify({
+          ...publicToolDetails('verify_project', fastCheckRaw),
+          args: {},
+        }));
+        const fastCheck = JSON.parse(fastCheckRaw);
         fastCheckPassed = fastCheck.success === true;
         if (fastCheckPassed) {
           checkOutput = 'Fast internal verification passed.';
@@ -633,6 +691,7 @@ export default defineConfig({
       }
 
       if (!fastCheckPassed) {
+      await throwIfBuildStopped(job);
       await emit(chatId, 'validating', 'Reviewing source files and fixing issues…');
       const resumeValidator = hasCheckpoint('validated') && !isReplan;
       if (!resumeValidator) {
@@ -643,6 +702,7 @@ export default defineConfig({
           () => runValidatorAgent({ tools: validatorTools ,emit,chatId,modelOptions}),
           1, 'CodeValidatorAgent'
         );
+        await throwIfBuildStopped(job);
         logger.endStage('CodeValidatorAgent');
       } catch (err) {
         logger.error('CodeValidatorAgent', err);
@@ -668,6 +728,7 @@ export default defineConfig({
           () => runCheckerAgent({ tools: checkerTools,emit,chatId,modelOptions }),
           1, 'AppCheckerAgent'
         );
+        await throwIfBuildStopped(job);
         logger.endStage('AppCheckerAgent');
       } catch (err) {
         logger.error('AppCheckerAgent', err);
@@ -781,7 +842,13 @@ export default defineConfig({
       logger._log('warn', 'File sync error', { error: err.message });
     }
 
-    const summary = checkOutput || 'Build pipeline completed.';
+    // A successful fast check is verification metadata, not the user-facing
+    // result. Keep the builder's actual summary so completed jobs describe the
+    // work that was done instead of the hardcoded verification sentence.
+    const usableBuilderSummary = builderSummary.length > 24 && !/^done[.!]?$/i.test(builderSummary);
+    const summary = buildFailed
+      ? (checkOutput || 'Build completed with issues.')
+      : (usableBuilderSummary ? builderSummary : 'Your requested changes have been implemented and verified.');
     const tokenSummary = logger.tokens.summary();
 
     await prisma.message.create({
@@ -799,6 +866,11 @@ export default defineConfig({
     return { previewUrl, summary, tokens: tokenSummary };
 
   } catch (err) {
+    if (err?.code === 'BUILD_STOPPED') {
+      await emit(chatId, 'done', 'Work stopped by user.').catch(() => { });
+      await logger.publishTelemetry().catch(() => { });
+      return { cancelled: true };
+    }
     const { type, message } = logger.error('pipeline', err);
     await emit(chatId, 'error', message, { errorType: type }).catch(() => { });
     await logger.publishTelemetry().catch(() => { });

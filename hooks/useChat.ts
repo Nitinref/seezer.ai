@@ -18,9 +18,10 @@ export function useChat(chatId: string | null) {
   const token = useAuthStore((s) => s.token);
   const {
     setIsBuilding, setBuildProgress, addPipelineEvent,
-    setPipelineEvents, setPreviewUrl, setActiveChatId, activeProject,
+    setPipelineEvents, setPreviewUrl, setActiveChatId, setActiveJobId, activeJobId, activeProject,
   } = useAppStore();
   const wsRef = useRef<ForgeWebSocket | null>(null);
+  const activeJobIdRef = useRef<string | null>(null);
 
   const latestChatQuery = useQuery({
     queryKey: ["project-chat", activeProject?.id],
@@ -61,6 +62,15 @@ export function useChat(chatId: string | null) {
     ws.on((event: PipelineEvent) => {
       if (event.type === "connected" || event.type === "pong") return;
 
+      // Telemetry is emitted after the assistant's final response is saved.
+      // Clear the active state here as well as on `done`, so follow-up chat is
+      // never held hostage by a late/missed final pipeline frame.
+      if (event.type === "telemetry") {
+        setIsBuilding(false);
+        setActiveJobId(null);
+        return;
+      }
+
       if (event.type === "pipeline_update" && event.stage) {
         addPipelineEvent(event);
 
@@ -74,9 +84,11 @@ export function useChat(chatId: string | null) {
 
         if (event.stage === "done") {
           setIsBuilding(false);
+          setActiveJobId(null);
         }
         if (event.stage === "error") {
           setIsBuilding(false);
+          setActiveJobId(null);
           toast.error(`Build error: ${event.message?.slice(0, 60)}`);
         }
       }
@@ -96,6 +108,8 @@ export function useChat(chatId: string | null) {
     mutationFn: (message: string) =>
       chatApi.send(activeProject!.id, message),
     onSuccess: (data) => {
+      activeJobIdRef.current = data.jobId;
+      setActiveJobId(data.jobId);
       setActiveChatId(data.chatId);
       setIsBuilding(true);
       setBuildProgress(0);
@@ -114,5 +128,25 @@ export function useChat(chatId: string | null) {
     wsRef.current?.disconnect();
   }, []);
 
-  return { messagesQuery, sendMutation, disconnect, chatId: resolvedChatId, wsConnected: wsRef.current?.connected ?? false };
+  const stopBuild = useCallback(async () => {
+    const jobId = activeJobId ?? activeJobIdRef.current;
+    if (!jobId) return false;
+
+    // Make the stop control feel immediate; the server call then cancels the
+    // queued or active worker safely in the background.
+    setIsBuilding(false);
+    setBuildProgress(0);
+    activeJobIdRef.current = null;
+    setActiveJobId(null);
+    try {
+      await chatApi.cancel(jobId);
+      toast.success("Work stopped");
+      return true;
+    } catch (error) {
+      toast.error("Could not stop the server job");
+      throw error;
+    }
+  }, [activeJobId, setActiveJobId, setBuildProgress, setIsBuilding]);
+
+  return { messagesQuery, sendMutation, stopBuild, disconnect, chatId: resolvedChatId, wsConnected: wsRef.current?.connected ?? false };
 }

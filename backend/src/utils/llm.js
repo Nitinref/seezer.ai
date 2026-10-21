@@ -80,7 +80,9 @@ const CHECKER_TIMEOUT_MS = Number.parseInt(
 );
 
 const BUILDER_TIMEOUT_MS = Number.parseInt(
-  process.env.BUILDER_TIMEOUT_MS || "300000",
+  // A stalled tool-calling turn used to keep the UI waiting for five minutes.
+  // Fail fast enough to surface a useful error/retry instead.
+  process.env.BUILDER_TIMEOUT_MS || "75000",
   10
 );
 

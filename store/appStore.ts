@@ -12,6 +12,7 @@ interface AppState {
   // Build state
   isBuilding: boolean;
   buildProgress: number;
+  activeJobId: string | null;
   pipelineEvents: PipelineEvent[];
 
   // Actions
@@ -22,6 +23,7 @@ interface AppState {
   setSelectedFile: (file: ProjectFile | null) => void;
   setIsBuilding: (v: boolean) => void;
   setBuildProgress: (p: number) => void;
+  setActiveJobId: (jobId: string | null) => void;
   addPipelineEvent: (event: PipelineEvent) => void;
   setPipelineEvents: (events: PipelineEvent[]) => void;
   clearPipelineEvents: () => void;
@@ -36,21 +38,23 @@ export const useAppStore = create<AppState>((set) => ({
   selectedFile: null,
   isBuilding: false,
   buildProgress: 0,
+  activeJobId: null,
   pipelineEvents: [],
 
-  setActiveProject:   (p)  => set({ activeProject: p, activeChatId: null, previewUrl: p?.previewUrl ?? null, pipelineEvents: [], selectedFile: null }),
+  setActiveProject:   (p)  => set({ activeProject: p, activeChatId: null, previewUrl: p?.previewUrl ?? null, pipelineEvents: [], selectedFile: null, activeJobId: null }),
   setActiveChatId:    (id) => set({ activeChatId: id }),
   setActiveTab:       (t)  => set({ activeTab: t }),
   setPreviewUrl:      (u)  => set({ previewUrl: u }),
   setSelectedFile:    (f)  => set({ selectedFile: f }),
   setIsBuilding:      (v)  => set({ isBuilding: v }),
   setBuildProgress:   (p)  => set({ buildProgress: p }),
+  setActiveJobId:     (jobId) => set({ activeJobId: jobId }),
   addPipelineEvent:   (e)  => set((s) => ({ pipelineEvents: [...s.pipelineEvents, e] })),
   setPipelineEvents:  (events) => set({ pipelineEvents: events }),
   clearPipelineEvents: ()  => set({ pipelineEvents: [] }),
   reset: () => set({
     activeProject: null, activeChatId: null, activeTab: "preview",
-    previewUrl: null, selectedFile: null, isBuilding: false,
+    previewUrl: null, selectedFile: null, isBuilding: false, activeJobId: null,
     buildProgress: 0, pipelineEvents: [],
   }),
 }));

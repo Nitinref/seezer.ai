@@ -73,11 +73,16 @@ ${userMessage}`;
       emit,
       chatId,
       temperature: 0.2,
-      maxTokens: repair ? 4096 : 8192,
-      maxSteps: repair ? 2 : 6,
+      // The model needs room to make tool calls, not to narrate code. A
+      // smaller response cap keeps normal builds responsive.
+      maxTokens: repair ? 2048 : 3072,
+      maxSteps: repair ? 2 : 4,
       modelType: 'builder',
       agentName: 'builder',
       modelOptions,
+      // The worker already emits the real tool results. Suppress LangGraph's
+      // internal node/thought events so they do not create noisy DB writes.
+      emit: () => {},
     }),
     new Promise((_, reject) =>
       setTimeout(() => reject(new Error(`BuilderAgent timeout after ${timeoutMs / 1000}s`)), timeoutMs)

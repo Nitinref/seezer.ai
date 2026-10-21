@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import { motion } from "motion/react";
 import {
   Activity,
   BookOpen,
@@ -64,15 +63,18 @@ export default function AceternitySidebar({ onNewProject }: { onNewProject?: () 
     <Sidebar open={open} setOpen={setOpen} hoverExpand={false}>
       <SidebarBody className="m-2 !h-[calc(100%-1rem)] justify-between gap-10 rounded-2xl border border-white/10 bg-[#181818] !px-2 py-6 shadow-2xl">
         <div className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
-          <div className="flex items-center justify-between gap-2">
+          <div
+            className={`flex items-center gap-2 ${
+              open ? "justify-end" : "flex-col justify-center"
+            }`}
+          >
             {open ? (
               <>
-                <Logo />
                 <button
                   type="button"
                   aria-label="Create new project"
                   onClick={onNewProject}
-                  className="ml-auto grid h-7 w-7 shrink-0 place-items-center rounded-md text-white/55 transition hover:bg-white/10 hover:text-white"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-white/55 transition hover:bg-white/10 hover:text-white"
                 >
                   <Plus size={18} />
                 </button>
@@ -176,23 +178,4 @@ export default function AceternitySidebar({ onNewProject }: { onNewProject?: () 
       </SidebarBody>
     </Sidebar>
   );
-}
-
-function Logo() {
-  return (
-    <div className="relative z-20 flex items-center gap-2 py-1">
-      <div className="h-7 w-7 shrink-0 rounded-md bg-white" />
-      <motion.span
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="whitespace-pre text-base font-semibold text-white"
-      >
-        Acet Labs
-      </motion.span>
-    </div>
-  );
-}
-
-function LogoIcon() {
-  return <div className="h-7 w-7 shrink-0 rounded-md bg-white" />;
 }

@@ -218,7 +218,16 @@ export default function DashboardPage() {
   return (
     <AuthGuard>
       {workspace ? (
-        <AppShell initialPrompt={initialPrompt} />
+        <AppShell
+          initialPrompt={initialPrompt}
+          onNewProject={() => {
+            setWorkspace(false);
+            setInitialPrompt(undefined);
+          }}
+          onBackToDashboard={() => {
+            setWorkspace(false);
+          }}
+        />
       ) : (
         <DashboardHome onStart={startBuilding} onOpenProject={openExistingProject} />
       )}
