@@ -415,7 +415,7 @@ body.landing-night-active {
 }
 
 .landing-night #how img {
-  content: url("/hero-balloon-meadow-night.png");
+  content: url("/hero-balloon-meadow-night.webp");
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgb(0 0 0 / .5) 18%, #000 34%, #000 58%, rgb(0 0 0 / .78) 75%, transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0%, rgb(0 0 0 / .5) 18%, #000 34%, #000 58%, rgb(0 0 0 / .78) 75%, transparent 100%);
 }
@@ -477,7 +477,7 @@ body.landing-night-active main.landing-page > section:last-child::before {
 }
 
 .landing-night > section:last-child > div:first-child {
-  background-image: url("/hero-balloon-meadow-night.png") !important;
+  background-image: url("/hero-balloon-meadow-night.webp") !important;
   filter: brightness(.94) saturate(1.02) contrast(1.03);
 }
 

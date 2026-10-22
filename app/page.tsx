@@ -11,7 +11,7 @@ import { MorphingText } from "@/components/ui/morphing-text";
 import { SizzerLogo } from "@/components/brand/SizzerLogo";
 
 const HERO = "/hero-balloon-meadow.png";
-const NIGHT_HERO = "/hero-balloon-meadow-night.png";
+const NIGHT_HERO = "/hero-balloon-meadow-night.webp";
 
 const CARD_ITEMS: CardStackItem[] = [
   { id: 1, title: "Describe it in plain words.", description: "No spec, no scaffolding, no setup screen to fill in first.", imageSrc: HERO, tag: "01" },
