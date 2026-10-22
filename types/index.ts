@@ -68,6 +68,7 @@ export type PipelineStage =
 
 export interface PipelineEvent {
   type: "pipeline_update" | "telemetry" | "connected" | "pong";
+  jobId?: string;
   stage?: PipelineStage;
   message?: string;
   ts: number;

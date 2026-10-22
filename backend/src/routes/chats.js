@@ -52,6 +52,13 @@ router.post('/', authenticate, async (req, res) => {
       model,
     });
 
+    // Persist the prompt before returning.  The worker may still be queued
+    // while E2B starts a sandbox, but the chat must show what the user asked
+    // for immediately instead of looking empty during that wait.
+    await prisma.message.create({
+      data: { chatId: chat.id, role: 'user', content: message, metadata: { jobId } },
+    });
+
     return res.status(202).json({ chatId: chat.id, jobId, status: 'queued' });
   } catch (err) {
     console.error('[chat/post]', err);

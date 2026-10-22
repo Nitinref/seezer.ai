@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
+import { restoreProjectPreview } from '../tools/sandboxTools.js';
 
 const router = Router();
 
@@ -48,6 +49,25 @@ router.get('/:id', async (req, res) => {
   } catch (err) {
     console.error('[projects/get]', err);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Recreate an expired E2B sandbox and obtain a fresh preview URL for a
+// reopened project. The project source is restored from ProjectFile records.
+router.post('/:id/restore-preview', async (req, res) => {
+  try {
+    const project = await prisma.project.findFirst({
+      where: { id: req.params.id, userId: req.user.id },
+      select: { id: true, previewUrl: true },
+    });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (!project.previewUrl) return res.status(409).json({ error: 'This project has no preview yet' });
+
+    const previewUrl = await restoreProjectPreview(project.id);
+    return res.json({ previewUrl });
+  } catch (err) {
+    console.error('[projects/restore-preview]', err);
+    return res.status(502).json({ error: err.message || 'Could not restore preview' });
   }
 });
 

@@ -1,15 +1,32 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { ArrowLeft, ArrowRight, Code2, ExternalLink, Gift, RefreshCw, Smartphone } from "lucide-react";
 import { useAppStore } from "@/store/appStore";
 import { CodeViewer } from "./CodeViewer";
 import LiquidWaveSpinner from "@/components/ui/spinner-10";
+import { projectsApi } from "@/lib/api";
 
 export function CenterPanel() {
-  const { activeTab, setActiveTab, previewUrl, isBuilding, buildProgress, pipelineEvents } = useAppStore();
+  const { activeProject, activeTab, setActiveTab, previewUrl, setPreviewUrl, isBuilding, buildProgress, pipelineEvents } = useAppStore();
+  const [isRestoringPreview, setIsRestoringPreview] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const lastEvent = pipelineEvents.findLast((event) => event.type === "pipeline_update" && event.stage);
   const stage = lastEvent?.stage ?? "";
+
+  const restorePreview = async () => {
+    if (!activeProject?.id || isRestoringPreview) return;
+    setIsRestoringPreview(true);
+    setPreviewError(null);
+    try {
+      const { previewUrl: freshPreviewUrl } = await projectsApi.restorePreview(activeProject.id);
+      setPreviewUrl(freshPreviewUrl);
+    } catch {
+      setPreviewError("Could not restart this preview. Please try again in a moment.");
+    } finally {
+      setIsRestoringPreview(false);
+    }
+  };
 
   return (
     <main className="m-2 flex h-[calc(100%-16px)] min-w-0 flex-col overflow-hidden rounded-xl border border-white/[0.16] bg-[#101012]">
@@ -24,7 +41,7 @@ export function CenterPanel() {
           <Smartphone size={15} />
           <span className="flex-1 truncate text-center text-sm text-white/75">{previewUrl?.replace(/^https?:\/\//, "") ?? "/"}</span>
           <button onClick={() => previewUrl && window.open(previewUrl, "_blank")} aria-label="Open preview"><ExternalLink size={15} /></button>
-          <button onClick={() => window.location.reload()} aria-label="Refresh"><RefreshCw size={15} /></button>
+          <button onClick={restorePreview} disabled={!activeProject?.id || isRestoringPreview} aria-label="Restart preview" title="Restart preview" className="disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={15} className={isRestoringPreview ? "animate-spin" : ""} /></button>
           <button onClick={() => setActiveTab(activeTab === "preview" ? "code" : "preview")} aria-label="Toggle code"><Code2 size={15} /></button>
         </div>
       </div>}
@@ -43,9 +60,13 @@ export function CenterPanel() {
           <div className="absolute bottom-7 flex gap-8 text-blue-400"><span>◉ Help Center</span><span>♣ Join our Community</span></div>
         </div>}
 
-        {isBuilding && activeTab === "preview" && <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#050505]/90 px-6 backdrop-blur-sm">
+        {(isBuilding || isRestoringPreview) && activeTab === "preview" && <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#050505]/90 px-6 backdrop-blur-sm">
           <LiquidWaveSpinner size="lg" className="max-w-sm bg-transparent" />
           <p className="mt-2 text-sm text-white/65">{stage || "Building"} · {buildProgress}%</p>
+        </div>}
+        {previewError && activeTab === "preview" && <div className="absolute inset-x-5 bottom-5 z-20 flex items-center justify-between gap-4 rounded-lg border border-rose-400/30 bg-[#201013]/95 px-4 py-3 text-sm text-rose-100 shadow-xl">
+          <span>{previewError}</span>
+          <button type="button" onClick={restorePreview} className="shrink-0 font-medium text-white underline underline-offset-4">Retry</button>
         </div>}
       </div>
     </main>

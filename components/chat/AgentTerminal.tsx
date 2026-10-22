@@ -354,7 +354,7 @@ function FlatFileChanges({
         return (
           <div key={file} className="flex min-h-9 items-center gap-2.5 text-[16px] tracking-[-0.015em]">
             {created ? <FilePlus2 size={17} strokeWidth={1.55} className="shrink-0 text-zinc-400" /> : <Pencil size={17} strokeWidth={1.55} className="shrink-0 text-zinc-400" />}
-            <span className="font-medium text-zinc-200">{created ? "Created" : "Edited"}</span>
+            <span className="font-medium text-zinc-200">{created ? "Created" : "Updated"}</span>
             <span className="min-w-0 truncate border-b border-dotted border-zinc-600 pb-px text-zinc-400">{file}</span>
             {(plus > 0 || minus > 0) && <span className="shrink-0 font-mono text-[13px] tabular-nums"><span className="text-emerald-400">+{plus}</span><span className="ml-2 text-rose-400">-{minus}</span></span>}
           </div>
@@ -655,9 +655,10 @@ function ActivityRow({ item, isRunning }: { item: Activity; isRunning?: boolean 
       "remove_file",
       "remove_files",
     ].includes(item.title);
-  const isCreate =
-    ["create_file", "write_multiple_files"].includes(item.title) &&
-    !payload.changed_files;
+  // `write_multiple_files` may either add or overwrite a file.  Its tool
+  // payload does not carry the previous file state, so never present it as a
+  // definite creation in the activity log.
+  const isCreate = item.title === "create_file" && !payload.changed_files;
   const diff = typeof payload.diff === "string" ? payload.diff : "";
   const fileChanges = new Map<string, { additions: number; deletions: number }>();
   if (Array.isArray(payload.file_changes)) {

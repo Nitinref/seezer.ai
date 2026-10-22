@@ -2,6 +2,7 @@ import "dotenv/config";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatGroq } from "@langchain/groq";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 
 /* ---------------- ENV ---------------- */
 
@@ -24,13 +25,14 @@ const OPENROUTER_CHECKER_MODEL =
 const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || "openrouter";
 const OPENROUTER_DEFAULT_MODEL =
   process.env.OPENROUTER_MODEL || "openrouter/free";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
 const GROQ_PLANNER_MODEL = process.env.GROQ_PLANNER_MODEL || "qwen/qwen3.8-27b";
 const GROQ_BUILDER_MODEL = process.env.GROQ_BUILDER_MODEL || "qwen/qwen3.8-27b";
 const GROQ_VALIDATOR_MODEL = process.env.GROQ_VALIDATOR_MODEL || "qwen/qwen3.8-27b";
 const GROQ_CHECKER_MODEL = process.env.GROQ_CHECKER_MODEL || "qwen/qwen3.8-27b";
 const AGENT_PROVIDERS = {
-  planner: process.env.PLANNER_PROVIDER || "openrouter",
+  planner: process.env.PLANNER_PROVIDER || "groq",
   builder: process.env.BUILDER_PROVIDER || "openrouter",
   validator: process.env.VALIDATOR_PROVIDER || "groq",
   checker: process.env.CHECKER_PROVIDER || "groq",
@@ -40,6 +42,7 @@ const AGENT_PROVIDERS = {
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
 // OpenRouter Config
 const OPENROUTER_BASE_URL =
@@ -124,6 +127,9 @@ function createOpenRouterModel(
     temperature,
     maxTokens,
     timeout,
+    // Free OpenRouter providers can silently retry/reroute for minutes.
+    // Let the pipeline make a visible, bounded retry instead.
+    maxRetries: 0,
 
     configuration: {
       baseURL: OPENROUTER_BASE_URL,
@@ -140,6 +146,19 @@ function createGroqModel(model, temperature = 0.2, maxTokens = 2048, timeout = R
   return new ChatGroq({ model, apiKey: GROQ_API_KEY, temperature, maxTokens, timeout });
 }
 
+function createGeminiModel(model, temperature = 0.2, maxTokens = 2048) {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY (or GOOGLE_API_KEY) missing");
+  return new ChatGoogleGenerativeAI({
+    model,
+    apiKey: GEMINI_API_KEY,
+    temperature,
+    maxOutputTokens: maxTokens,
+    // The Gemini free tier has a small daily request allowance. Retrying a
+    // 429 internally spends more requests without helping the active build.
+    maxRetries: 0,
+  });
+}
+
 /* ---------------- MAIN FACTORY ---------------- */
 
 export function makeModel(
@@ -152,7 +171,13 @@ export function makeModel(
   const selectedProvider = options.provider && ["planner", "builder"].includes(agentType)
     ? options.provider
     : provider;
-  const timeout = agentType === "planner" ? PLANNER_TIMEOUT_MS : agentType === "builder" ? BUILDER_TIMEOUT_MS : agentType === "validator" ? VALIDATOR_TIMEOUT_MS : CHECKER_TIMEOUT_MS;
+  const timeout = agentType === "planner"
+    ? PLANNER_TIMEOUT_MS
+    : agentType === "builder"
+      ? Math.min(BUILDER_TIMEOUT_MS, 60_000)
+      : agentType === "validator"
+        ? VALIDATOR_TIMEOUT_MS
+        : CHECKER_TIMEOUT_MS;
 
   if (selectedProvider === "groq") {
     const groqModel = agentType === "planner"
@@ -163,6 +188,10 @@ export function makeModel(
           ? GROQ_CHECKER_MODEL
           : GROQ_VALIDATOR_MODEL;
     return createGroqModel(groqModel, temperature, maxTokens, timeout);
+  }
+
+  if (selectedProvider === "gemini") {
+    return createGeminiModel(options.model || GEMINI_MODEL, temperature, maxTokens);
   }
 
   if (selectedProvider === "openrouter") {
@@ -225,7 +254,9 @@ export {
   OPENROUTER_DEFAULT_MODEL,
   GROQ_VALIDATOR_MODEL,
   GROQ_CHECKER_MODEL,
+  GEMINI_MODEL,
   GROQ_PLANNER_MODEL,
+  GROQ_BUILDER_MODEL,
   AGENT_PROVIDERS,
   REQUEST_TIMEOUT_MS,
   PLANNER_TIMEOUT_MS,

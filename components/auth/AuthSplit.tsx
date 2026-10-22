@@ -4,6 +4,7 @@ import type { InputHTMLAttributes, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowUpRight } from "lucide-react";
+import { SizzerLogo } from "@/components/brand/SizzerLogo";
 
 const HERO = "/hero-balloon-meadow.png";
 
@@ -14,7 +15,7 @@ export function AuthSplit({ title, subtitle, children }: { title: string; subtit
     <aside className="relative hidden min-h-screen overflow-hidden bg-[#13577a] lg:block">
       <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `linear-gradient(180deg, rgba(5,53,82,.56), rgba(3,43,62,.46)), url(${HERO})` }} />
       <div className="relative z-10 flex min-h-screen flex-col justify-between p-12 text-white">
-        <Link href="/" className="flex w-fit items-center gap-3 text-[22px] font-semibold tracking-[-0.04em] text-white no-underline"><span className="grid h-7 w-7 place-items-center rounded-full border-2 border-sky-300 text-[15px]">c</span>sizzer</Link>
+        <Link href="/" className="w-fit text-white no-underline"><SizzerLogo /></Link>
         <div className="max-w-[400px]"><p className="mb-7 text-[11px] font-semibold uppercase tracking-[0.3em] text-white/75">{signup ? "Welcome aboard" : "Welcome back"}</p><h2 className="font-serif text-[clamp(48px,5vw,74px)] leading-[.9] tracking-[-0.06em]">{signup ? <>Make something<br /><em>worth keeping.</em></> : <>Pick up where<br /><em>you left off.</em></>}</h2><p className="mt-8 max-w-[330px] text-[16px] leading-7 text-white/80">{signup ? "Your next idea starts with a sentence. Build it, keep it, and make it yours." : "Your projects, their source, and the conversation that made them are all where you left them."}</p></div>
         <p className="text-[13px] text-white/70">© 2026 Sizzer</p>
       </div>

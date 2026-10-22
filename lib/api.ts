@@ -60,6 +60,9 @@ export const projectsApi = {
 
   fileContent: (id: string, path: string) =>
     apiClient.get<{ file: ProjectFile }>(`/projects/${id}/files/${path}`).then((r) => r.data.file),
+
+  restorePreview: (id: string) =>
+    apiClient.post<{ previewUrl: string }>(`/projects/${id}/restore-preview`).then((r) => r.data),
 };
 
 

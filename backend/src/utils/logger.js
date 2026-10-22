@@ -129,7 +129,12 @@ export class PipelineLogger {
 
   // Log an error with classification
   error(stage, err) {
-    const msg  = err?.message ?? String(err);
+    const rawMessage = err?.message ?? String(err);
+    // Some LLM providers attach the full attempted tool-call JSON to an
+    // error. Do not send source code into terminal logs or chat events.
+    const msg = rawMessage.includes('failed_generation') || rawMessage.length > 1_000
+      ? 'Model produced an invalid or truncated tool call.'
+      : rawMessage;
     const type = classifyError(msg);
     this._log('error', `[${stage}] ${type.toUpperCase()} error: ${msg}`, { errorType: type });
     return { type, message: msg };

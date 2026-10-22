@@ -16,6 +16,9 @@ import {
   OPENROUTER_CHECKER_MODEL,
   GROQ_VALIDATOR_MODEL,
   GROQ_CHECKER_MODEL,
+  GROQ_PLANNER_MODEL,
+  GROQ_BUILDER_MODEL,
+  GEMINI_MODEL,
   AGENT_PROVIDERS
 } from '../utils/llm.js';
 import prisma from '../db/index.js';
@@ -28,6 +31,17 @@ import { runCheckerAgent } from '../agents/checkerAgent.js';
 
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Pipeline events do not otherwise carry the Bull job identifier. Retaining
+// it for the active run lets a reconnected client still expose a real Stop
+// control while BullMQ retries the same job.
+const activeBuildJobsByChat = new Map();
+
+function compactErrorMessage(error) {
+  const message = error?.message ?? String(error);
+  return message.includes('failed_generation') || message.length > 1_000
+    ? 'Model produced an invalid or truncated tool call.'
+    : message;
+}
 
 async function throwIfBuildStopped(job) {
   const stopped = await bullConnection.get(`build:cancel:${job.id}`);
@@ -76,7 +90,7 @@ async function withRetry(fn, maxRetries = 1, label = '') {
     } catch (err) {
       const msg = err?.message ?? String(err);
       const isRateLimit = msg.includes('429') || msg.includes('rate_limit') || msg.includes('rate limit') || msg.includes('free-models-per-day');
-      const isTransient = msg.includes('429') || msg.includes('Too Many Requests') || msg.includes('rate_limit_exceeded') || msg.includes('overloaded') || msg.includes('fetch failed') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT');
+      const isTransient = msg.includes('429') || msg.includes('Too Many Requests') || msg.includes('rate_limit_exceeded') || msg.includes('overloaded') || msg.includes('503') || msg.includes('Service Unavailable') || msg.includes('high demand') || msg.includes('fetch failed') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT');
 
       if (isTransient && !isRateLimit && attempt < maxRetries) {
         const waitMs = Math.min(30_000 * Math.pow(2, attempt) + Math.random() * 5_000, 120_000);
@@ -101,7 +115,15 @@ function isReviewAgentFailure(err) {
 }
 
 async function emit(chatId, stage, message, extra = {}) {
-  const event = { type: 'pipeline_update', stage, message, ts: Date.now(), ...extra };
+  const jobId = activeBuildJobsByChat.get(chatId);
+  const event = {
+    type: 'pipeline_update',
+    stage,
+    message,
+    ts: Date.now(),
+    ...(jobId ? { jobId } : {}),
+    ...extra,
+  };
   const payload = JSON.stringify(event);
   try {
     const chat = await prisma.chat.findUnique({
@@ -120,7 +142,7 @@ async function emit(chatId, stage, message, extra = {}) {
   await publisher.publish(buildChannel(chatId), payload);
 }
 
-async function scaffoldReactApp(sb, chatId) {
+async function scaffoldReactApp(sb, chatId, projectId) {
   await emit(chatId, 'sandbox', 'Scaffolding React + Tailwind + React Icons…');
 
   if (!sb?.files) throw new Error(`Sandbox files API not available. Keys: ${Object.keys(sb ?? {}).join(', ')}`);
@@ -176,6 +198,11 @@ async function scaffoldReactApp(sb, chatId) {
       deletions: 0,
     };
   }));
+
+  // The UI receives the scaffold write event next. Persist those same files
+  // first so Code view can show the default project immediately, rather than
+  // waiting for the end-of-build sync or preview server.
+  await syncProjectFiles(sb, projectId, { _log: () => {} });
 
   await emit(chatId, 'tool', JSON.stringify({
     version: 1,
@@ -275,23 +302,76 @@ function publicToolArgs(args = {}) {
   return safe;
 }
 
-function toLangChainTools(sandboxTools, emit, chatId) {
+function changedProjectPaths(toolName, args, result) {
+  if (!['create_file', 'edit_files', 'write_multiple_files', 'delete_file'].includes(toolName)) return [];
+
+  let payload = result;
+  try { payload = JSON.parse(result); } catch { }
+  const candidates = [
+    ...(Array.isArray(payload?.changed_files) ? payload.changed_files : []),
+    ...(Array.isArray(payload?.results) ? payload.results.map((file) => file?.path) : []),
+    ...(Array.isArray(payload?.files) ? payload.files.map((file) => typeof file === 'string' ? file : file?.path) : []),
+    payload?.path,
+    args?.path,
+    ...(Array.isArray(args?.files) ? args.files.map((file) => file?.path) : []),
+    ...(Array.isArray(args?.edits) ? args.edits.map((edit) => edit?.path) : []),
+  ];
+
+  return [...new Set(candidates
+    .filter((path) => typeof path === 'string')
+    .map((path) => path.replace(/^\/app\//, '').replace(/^app\//, ''))
+    .filter((path) => path && !path.includes('..')),
+  )];
+}
+
+async function syncToolChanges(projectId, toolName, args, result) {
+  const paths = changedProjectPaths(toolName, args, result);
+  if (!paths.length) return;
+
+  if (toolName === 'delete_file') {
+    await prisma.projectFile.deleteMany({ where: { projectId, path: { in: paths } } });
+    return;
+  }
+
+  const sandbox = await getOrCreateSandbox(projectId);
+  await Promise.all(paths.map(async (path) => {
+    const content = await sandbox.files.read(`/app/${path}`);
+    await prisma.projectFile.upsert({
+      where: { projectId_path: { projectId, path } },
+      update: { content },
+      create: { projectId, path, content },
+    });
+  }));
+}
+
+function toLangChainTools(sandboxTools, emit, chatId, projectId) {
   return sandboxTools.map((t) =>
     new DynamicStructuredTool({
       name: t.name,
       description: t.description,
       schema: t.parameters,
       func: async (args) => {
+        const startedAt = Date.now();
+        console.log(`[Tool] ${t.name} started`);
         try {
           const result = await t.execute(args);
           if (result === undefined || result === null) return '(no output)';
           const str = typeof result === 'string' ? result : JSON.stringify(result);
+          const executeMs = Date.now() - startedAt;
+          // Store the changed source immediately, rather than waiting for the
+          // final project sync. The client can therefore open new code as
+          // each tool call finishes, before a preview exists.
+          await syncToolChanges(projectId, t.name, args, str).catch((error) => {
+            console.warn(`[live file sync] ${t.name} failed: ${error.message}`);
+          });
+          console.log(`[Tool] ${t.name} completed in ${Date.now() - startedAt}ms (execution ${executeMs}ms)`);
           await emit(chatId, 'tool', JSON.stringify({
             ...publicToolDetails(t.name, str),
             args: publicToolArgs(args),
           }));
           return str.trim() === '' ? '(empty output)' : str;
         } catch (err) {
+          console.error(`[Tool] ${t.name} failed after ${Date.now() - startedAt}ms: ${err?.message ?? String(err)}`);
           return `Tool error: ${err?.message ?? String(err)}`;
         }
       },
@@ -331,6 +411,17 @@ export default defineConfig({
   server: { host: true, port: 5173, strictPort: true, allowedHosts: true }
 })
 `);
+    // A newly recreated E2B sandbox only contains files restored from the
+    // database; dependencies such as Vite are not part of that restore.
+    // Install them before launching the dev server so an expired sandbox can
+    // produce a fresh preview URL on the same build run.
+    const install = await sb.commands.run('npm install --no-audit --no-fund', {
+      cwd: '/app',
+      timeoutMs: 120_000,
+    });
+    if (install.exitCode !== 0) {
+      throw new Error(`Dependency install failed: ${String(install.stderr || install.stdout).slice(-500)}`);
+    }
     // A reused sandbox may still have the previous Vite process alive. If we
     // leave it running, strictPort makes the new server fail and the preview
     // silently keeps serving the old scaffold.
@@ -360,6 +451,7 @@ export default defineConfig({
       ? (hostname.startsWith('http') ? hostname : `https://${hostname}`)
       : null;
     if (previewUrl) {
+      console.log(`[Preview] Build preview ready for project ${projectId}: ${previewUrl}`);
       await emit(chatId, 'preview', 'Preview is ready while background checks continue.', { previewUrl });
       await prisma.project.update({
         where: { id: projectId },
@@ -368,6 +460,7 @@ export default defineConfig({
     }
     return previewUrl;
   } catch (err) {
+    console.error(`[Preview] Build preview failed for project ${projectId}: ${err.message}`);
     logger._log('warn', 'Early preview start failed', { error: err.message });
     return null;
   }
@@ -400,7 +493,8 @@ async function syncProjectFiles(sb, projectId, logger) {
 
 async function processBuildJob(job) {
   const { chatId, projectId, userMessage, previousMessages, provider, model } = job.data;
-  const modelOptions = provider === 'openrouter' ? { provider, model } : {};
+  activeBuildJobsByChat.set(chatId, String(job.id));
+  const modelOptions = ['openrouter', 'gemini'].includes(provider) ? { provider, model } : {};
   const previousProgress = job.progress && typeof job.progress === 'object' ? job.progress : {};
   const resumeStage = previousProgress.stage || null;
   const isRetryResume = job.attemptsMade > 0 && Boolean(resumeStage);
@@ -408,17 +502,22 @@ async function processBuildJob(job) {
   const hasCheckpoint = (stage) => isRetryResume && (stageRank[resumeStage] || 0) >= stageRank[stage];
   const logger = new PipelineLogger(chatId, job.id);
   logger.startStage('pipeline');
-  await throwIfBuildStopped(job);
 
   try {
+    // A cancelled job must be handled below rather than escape before this
+    // try/catch; otherwise BullMQ retries the same cancellation as a failure.
+    await throwIfBuildStopped(job);
     await emit(chatId, 'start', 'Build job received — pipeline starting…');
-    logger._log('info', 'Pipeline started', { projectId, msg: userMessage.slice(0, 80) });
+    logger._log('info', 'Pipeline started', {
+      projectId,
+      msg: userMessage.slice(0, 80),
+      requestedProvider: provider ?? 'default',
+      requestedModel: model ?? 'default',
+      effectivePlannerProvider: modelOptions.provider ?? AGENT_PROVIDERS.planner,
+      effectiveBuilderProvider: modelOptions.provider ?? AGENT_PROVIDERS.builder,
+    });
 
     if (job.attemptsMade > 0 && !isRetryResume) await sleep(15_000);
-
-    await prisma.message.create({
-      data: { chatId, role: 'user', content: userMessage, metadata: { jobId: job.id } },
-    });
 
     logger.startStage('sandbox');
     await emit(chatId, 'sandbox', 'Initialising cloud sandbox…');
@@ -433,7 +532,7 @@ async function processBuildJob(job) {
     try { await sb.files.read('/app/package.json'); } catch { needsScaffold = true; }
 
     if (needsScaffold) {
-      await scaffoldReactApp(sb, chatId);
+      await scaffoldReactApp(sb, chatId, projectId);
     } else {
      await emit(chatId, 'sandbox', 'Existing sandbox reused.')
 
@@ -473,7 +572,7 @@ export default defineConfig({
 
 
     const sandboxTools = makeSandboxTools(projectId);
-    const lcTools = toLangChainTools(sandboxTools, emit, chatId);
+    const lcTools = toLangChainTools(sandboxTools, emit, chatId, projectId);
     const toolMap = Object.fromEntries(sandboxTools.map((t) => [t.name, t]));
 
     // Keep Builder focused on reading and writing the app. Shell/build/browser
@@ -574,9 +673,37 @@ export default defineConfig({
         }
         logger.endStage('PlannerAgent');
       } catch (err) {
-        logger.error('PlannerAgent', err);
-        logger.endStage('PlannerAgent', { errorType: 'unknown' });
-        throw err;
+        // OpenRouter free routes can leave a planner request pending even
+        // though the rest of the pipeline is healthy. A missing plan is not
+        // a reason to discard the whole build: use the fast Groq planner as
+        // a recovery path, then fall through to the local fallback plan.
+        logger._log('warn', 'PlannerAgent failed', { error: err?.message ?? String(err), provider });
+
+        const activePlannerProvider = modelOptions.provider ?? AGENT_PROVIDERS.planner;
+        if (['openrouter', 'gemini'].includes(activePlannerProvider)) {
+          try {
+            await emit(chatId, 'planning', 'Planner is taking too long; retrying with a faster model…');
+            planOutput = await runPlannerAgent({
+              prompt: `${planPrompt}\n\nReturn a compact, non-empty JSON build plan only.`,
+              emit,
+              chatId,
+              modelOptions: { provider: 'groq' },
+              timeoutMs: 45_000,
+            });
+            logger.endStage('PlannerAgent', { recoveredWith: 'groq' });
+          } catch (fallbackErr) {
+            logger._log('warn', 'Planner fallback failed; using local plan', {
+              error: fallbackErr?.message ?? String(fallbackErr),
+            });
+            planOutput = '';
+            await emit(chatId, 'planning', 'Planner is unavailable; continuing with a direct build plan.');
+            logger.endStage('PlannerAgent', { fallback: true });
+          }
+        } else {
+          planOutput = '';
+          await emit(chatId, 'planning', 'Planner is unavailable; continuing with a direct build plan.');
+          logger.endStage('PlannerAgent', { fallback: true });
+        }
       }
 
       await job.updateProgress({ percent: 25 + replanCount * 5, stage: 'planned' });
@@ -612,31 +739,73 @@ export default defineConfig({
       logger.startStage('BuilderAgent');
 
       try {
-        let buildResult = await withRetry(
-          () => runBuilderAgent({ plan: planObj, userMessage: fullPrompt, tools: builderTools ,emit,chatId,modelOptions}),
-          1, 'BuilderAgent'
-        );
-        await throwIfBuildStopped(job);
-
-        if (!buildResult.wroteFiles) {
-          await emit(chatId, 'building', 'The builder inspected the project but did not write files. Retrying with a write-only pass…');
-          buildResult = await withRetry(
+        // Honour the provider/model chosen for this job. Gemini is the primary
+        // builder, with Groq/Qwen as a recovery path for quota, timeout, or
+        // provider-tool-call failures.
+        const builderModelOptions = modelOptions;
+        const runBuildPass = async (options, label, compactFallback = false) => {
+          const activeProvider = options.provider ?? AGENT_PROVIDERS.builder;
+          // Do not leave the UI stuck on a Gemini tool-call request. If it
+          // has not responded within 45 seconds, switch to the Qwen fallback
+          // while the project is still in a clean, buildable state.
+          const timeoutMs = activeProvider === 'gemini' ? 45_000 : undefined;
+          // A retry against an overloaded free Gemini endpoint only makes the
+          // UI appear stuck and can consume the remaining quota. Hand control
+          // to Qwen immediately; other providers retain one bounded retry.
+          const retries = activeProvider === 'gemini' ? 0 : 1;
+          let result = await withRetry(
             () => runBuilderAgent({
               plan: planObj,
               userMessage: fullPrompt,
-              tools: builderWriteTools,
+              tools: builderTools,
               emit,
               chatId,
-              // Use the same configured provider for the repair pass. This
-              // keeps builder-provider selection consistent across a job.
-              modelOptions,
-              repair: true,
+              modelOptions: options,
+              compactFallback,
+              forceWriteTool: compactFallback,
+              ...(timeoutMs ? { timeoutMs } : {}),
             }),
-            0, 'BuilderRepair'
+            retries, label
           );
-        }
-        if (!buildResult.wroteFiles) {
-          throw new Error('Builder completed without writing any project files after the write-only retry.');
+          await throwIfBuildStopped(job);
+
+          if (!result.wroteFiles) {
+            await emit(chatId, 'building', 'The builder inspected the project but did not write files. Retrying with a write-only pass…');
+            result = await withRetry(
+              () => runBuilderAgent({
+                plan: planObj,
+                userMessage: fullPrompt,
+                tools: builderWriteTools,
+                emit,
+                chatId,
+                modelOptions: options,
+                repair: true,
+                compactFallback,
+                forceWriteTool: compactFallback,
+                ...(timeoutMs ? { timeoutMs } : {}),
+              }),
+              retries, `${label}Repair`
+            );
+          }
+          if (!result.wroteFiles) {
+            throw new Error('Builder completed without writing any project files after the write-only retry.');
+          }
+          return result;
+        };
+
+        let buildResult;
+        try {
+          buildResult = await runBuildPass(builderModelOptions, 'BuilderAgent');
+        } catch (primaryError) {
+          if (primaryError?.code === 'BUILD_STOPPED') throw primaryError;
+          const primaryProvider = builderModelOptions.provider ?? AGENT_PROVIDERS.builder;
+          if (primaryProvider !== 'gemini') throw primaryError;
+
+          logger._log('warn', 'Gemini builder failed; falling back to Groq/Qwen', {
+            error: primaryError?.message ?? String(primaryError),
+          });
+          await emit(chatId, 'building', 'Gemini is unavailable; continuing with the Qwen fallback…');
+          buildResult = await runBuildPass({ provider: 'groq' }, 'BuilderFallbackQwen', true);
         }
         builderSummary = String(buildResult.output ?? '').trim();
         logger.endStage('BuilderAgent');
@@ -862,18 +1031,24 @@ export default defineConfig({
     await logger.publishTelemetry();
     await job.updateProgress(100);
     await emit(chatId, 'done', summary, { previewUrl, tokens: tokenSummary, replans: replanCount });
+    activeBuildJobsByChat.delete(chatId);
 
     return { previewUrl, summary, tokens: tokenSummary };
 
   } catch (err) {
     if (err?.code === 'BUILD_STOPPED') {
+      // Consume the cancellation marker. The handler returns successfully,
+      // so this job is completed once and cannot be retried as a failure.
+      await bullConnection.del(`build:cancel:${job.id}`).catch(() => { });
       await emit(chatId, 'done', 'Work stopped by user.').catch(() => { });
       await logger.publishTelemetry().catch(() => { });
+      activeBuildJobsByChat.delete(chatId);
       return { cancelled: true };
     }
     const { type, message } = logger.error('pipeline', err);
     await emit(chatId, 'error', message, { errorType: type }).catch(() => { });
     await logger.publishTelemetry().catch(() => { });
+    activeBuildJobsByChat.delete(chatId);
 
     try {
       await prisma.message.create({
@@ -900,7 +1075,15 @@ worker.on('completed', (job) =>
   console.log(JSON.stringify({ level: 'info', event: 'job_completed', jobId: job.id, ts: new Date().toISOString() }))
 );
 worker.on('failed', (job, err) =>
-  console.error(JSON.stringify({ level: 'error', event: 'job_failed', jobId: job?.id, error: err.message, ts: new Date().toISOString() }))
+  console.error(JSON.stringify({
+    level: 'error',
+    event: 'job_failed',
+    jobId: job?.id,
+    // Tool providers may include an entire attempted source tree in a failed
+    // function-call payload. Keep server logs useful without dumping code.
+    error: compactErrorMessage(err),
+    ts: new Date().toISOString(),
+  }))
 );
 worker.on('error', (err) =>
   console.error(JSON.stringify({ level: 'error', event: 'worker_error', error: err.message, ts: new Date().toISOString() }))
@@ -913,8 +1096,16 @@ console.log(JSON.stringify({
   builderProvider: AGENT_PROVIDERS.builder,
   validatorProvider: AGENT_PROVIDERS.validator,
   checkerProvider: AGENT_PROVIDERS.checker,
-  plannerModel: process.env.OPENROUTER_MODEL || CLAUDE_PLANNER_MODEL,
-  builderModel: process.env.OPENROUTER_MODEL || CLAUDE_BUILDER_MODEL,
+  plannerModel: AGENT_PROVIDERS.planner === 'gemini'
+    ? GEMINI_MODEL
+    : AGENT_PROVIDERS.planner === 'groq'
+      ? GROQ_PLANNER_MODEL
+      : process.env.OPENROUTER_MODEL || CLAUDE_PLANNER_MODEL,
+  builderModel: AGENT_PROVIDERS.builder === 'gemini'
+    ? GEMINI_MODEL
+    : AGENT_PROVIDERS.builder === 'groq'
+      ? GROQ_BUILDER_MODEL
+      : process.env.OPENROUTER_MODEL || CLAUDE_BUILDER_MODEL,
   validatorModel: AGENT_PROVIDERS.validator === 'groq' ? GROQ_VALIDATOR_MODEL : OPENROUTER_VALIDATOR_MODEL,
   checkerModel: AGENT_PROVIDERS.checker === 'groq' ? GROQ_CHECKER_MODEL : OPENROUTER_CHECKER_MODEL,
   ts: new Date().toISOString(),

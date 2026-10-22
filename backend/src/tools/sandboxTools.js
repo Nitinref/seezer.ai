@@ -4,6 +4,24 @@ import prisma from '../db/index.js';
 
 // ── Sandbox registry: projectId → Sandbox instance ────────────────────────
 const sandboxRegistry = new Map();
+const SANDBOX_CONNECT_TIMEOUT_MS = Number(process.env.SANDBOX_CONNECT_TIMEOUT_MS || 75_000);
+
+async function withinSandboxTimeout(operation, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Sandbox ${label} timed out after ${Math.round(SANDBOX_CONNECT_TIMEOUT_MS / 1000)}s`)),
+          SANDBOX_CONNECT_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Return an existing sandbox (if alive) or create a new one.
@@ -28,9 +46,9 @@ export async function getOrCreateSandbox(projectId) {
   });
   if (project?.sandboxId && !project.sandboxId.startsWith('local-')) {
     try {
-      const restored = await Sandbox.connect(project.sandboxId, {
+      const restored = await withinSandboxTimeout(Sandbox.connect(project.sandboxId, {
         apiKey: process.env.E2B_API_KEY,
-      });
+      }), 'reconnection');
       await restored.files.list('/');
       sandboxRegistry.set(projectId, restored);
       console.log(`[Sandbox] Reconnected to saved sandbox for project ${projectId}: ${project.sandboxId}`);
@@ -40,10 +58,10 @@ export async function getOrCreateSandbox(projectId) {
     }
   }
 
-  const sb = await Sandbox.create(process.env.E2B_TEMPLATE_ID || 'base', {
-    apiKey:    process.env.E2B_API_KEY,
+  const sb = await withinSandboxTimeout(Sandbox.create(process.env.E2B_TEMPLATE_ID || 'base', {
+    apiKey: process.env.E2B_API_KEY,
     timeoutMs: 10 * 60 * 1000,
-  });
+  }), 'creation');
 
   sandboxRegistry.set(projectId, sb);
   await prisma.project.update({
@@ -83,6 +101,48 @@ export async function killSandbox(projectId) {
     try { await sb.kill(); } catch {}
     sandboxRegistry.delete(projectId);
     console.log(`[Sandbox] Killed sandbox for project ${projectId}`);
+  }
+}
+
+/**
+ * Rehydrate a project's sandbox and restart its preview server when a saved
+ * preview URL has expired. E2B sandboxes are ephemeral, so a stored hostname
+ * alone is not enough to make an old project previewable after reopening it.
+ */
+export async function restoreProjectPreview(projectId) {
+  const sb = await getOrCreateSandbox(projectId);
+  try {
+    console.log(`[Preview] Restoring preview for project ${projectId} in sandbox ${sb.sandboxId}`);
+    const install = await sb.commands.run('npm install --no-audit --no-fund', { cwd: '/app', timeoutMs: 120_000 });
+    if (install.exitCode !== 0) {
+      throw new Error(`Dependency install failed: ${String(install.stderr || install.stdout).slice(-500)}`);
+    }
+    console.log(`[Preview] Dependencies installed for project ${projectId}`);
+    await sb.commands.run("pkill -f 'vite.*5173' >/dev/null 2>&1 || true", { cwd: '/app', timeoutMs: 10_000 }).catch(() => {});
+    await sb.commands.run('nohup npm run dev -- --host 0.0.0.0 --port 5173 >/tmp/sizzer-vite.log 2>&1 </dev/null &', { cwd: '/app', timeoutMs: 10_000 });
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      try {
+        await sb.commands.run('curl -fsS http://127.0.0.1:5173 >/dev/null', { cwd: '/app', timeoutMs: 5_000 });
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+    }
+
+    const hostname = await sb.getHost(5173);
+    const previewUrl = hostname ? (hostname.startsWith('http') ? hostname : `https://${hostname}`) : null;
+    if (!previewUrl) throw new Error('Preview server did not expose a public URL');
+
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { sandboxId: sb.sandboxId ?? `local-${projectId}`, previewUrl },
+    });
+    console.log(`[Preview] Ready for project ${projectId}: ${previewUrl}`);
+    return previewUrl;
+  } catch (error) {
+    console.error(`[Preview] Restore failed for project ${projectId}: ${error.message}`);
+    throw new Error(`Could not restore preview: ${error.message}`);
   }
 }
 

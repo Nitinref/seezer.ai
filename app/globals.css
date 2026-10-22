@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;1,400&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;1,500&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;1,400&family=Sora:wght@600;700&family=Syne:wght@500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -8,6 +8,7 @@
 @theme {
   /* ── Fonts ── */
   --font-sans: "Inter", "Segoe UI", Arial, sans-serif;
+  --font-brand: "Sora", "Avenir Next", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
   --font-display: var(--font-syne), "Syne", sans-serif;
 
@@ -72,6 +73,117 @@
 .dashboard-aurora > section {
   position: relative;
   z-index: 10;
+}
+
+/* Blend the pale section above into the scenic footer without a hard seam. */
+main.landing-page > section:last-child::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 8rem;
+  background: linear-gradient(to bottom, #f7f8f5 0%, rgba(225, 243, 252, 0.82) 42%, transparent 100%);
+  backdrop-filter: blur(4px);
+}
+
+main.landing-page > #questions {
+  border-top-width: 0;
+  border-bottom-width: 0;
+}
+
+/* Keep the caption under the image and remove the repeated intro below. */
+main.landing-page > #how > p:last-child {
+  display: block;
+}
+
+main.landing-page > #how + section > p:first-child {
+  display: none;
+}
+
+/* Give the hero image a richer, deeper color grade. */
+main.landing-page > section:first-child > div:first-child {
+  filter: brightness(0.82) saturate(1.08) contrast(1.06);
+}
+
+main.landing-page > section:first-child h1 {
+  font-family: var(--font-display) !important;
+  font-size: clamp(40px, 6.6vw, 86px) !important;
+  font-weight: 600;
+  line-height: 1.06 !important;
+  text-shadow: 0 2px 30px rgb(10 30 50 / 40%);
+}
+
+.hero-line-rise {
+  animation: hero-line-rise 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--i) * 120ms);
+}
+
+@keyframes hero-line-rise {
+  from { opacity: 0; transform: translateY(0.42em); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+main.landing-page > section:first-child > div:last-child {
+  display: none;
+}
+
+/* Keep the content width intact; only move the visual guides inward. */
+main.landing-page > #how,
+main.landing-page > #how + section {
+  max-width: 965px !important;
+  position: relative;
+  border-left-width: 0;
+  border-right-width: 0;
+}
+
+main.landing-page > #how::before,
+main.landing-page > #how::after,
+main.landing-page > #how + section::before,
+main.landing-page > #how + section::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  bottom: 0;
+  width: 0.5px;
+  background: rgb(223 229 228 / 55%);
+}
+
+main.landing-page > #how::before,
+main.landing-page > #how + section::before {
+  left: calc(50% - 465px);
+}
+
+main.landing-page > #how::after,
+main.landing-page > #how + section::after {
+  right: calc(50% - 465px);
+}
+
+/* Scenic footer: preserve the vivid meadow while fading into a pale blue sky. */
+main.landing-page > section:last-child > div:nth-child(2) {
+  background: linear-gradient(
+    to bottom,
+    rgba(246, 252, 255, 0.96) 0%,
+    rgba(232, 246, 253, 0.88) 24%,
+    rgba(213, 237, 248, 0.52) 43%,
+    rgba(190, 221, 237, 0.12) 58%,
+    transparent 74%
+  ) !important;
+}
+
+main.landing-page > section:last-child > div:nth-child(3) {
+  background: linear-gradient(to right, rgba(246, 252, 255, 0.1), transparent 20%, transparent 80%, rgba(246, 252, 255, 0.1)) !important;
+}
+
+main.landing-page > section:last-child > div:nth-child(4) {
+  top: 42%;
+  color: rgb(20 95 128 / 13%);
+  font-size: clamp(105px, 14vw, 230px);
+  letter-spacing: -0.07em;
 }
 
 @theme inline {
@@ -211,4 +323,195 @@
     opacity: 0.4;
     transform: translate(-50%, -40%) scale(1);
   }
+}
+
+/* Landing page night mode — the same meadow becomes a deep, moonlit scene. */
+.landing-night {
+  background: #07101f !important;
+  color: #eaf4ff;
+}
+
+body.landing-night-active {
+  background: #07101f !important;
+}
+
+.landing-night > section:first-child {
+  background: #07142b !important;
+  isolation: isolate;
+}
+
+.landing-night > section:first-child > div:first-child {
+  filter: brightness(1.18) saturate(1.08) contrast(1.02) !important;
+}
+
+.landing-night > section:first-child::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  opacity: .42;
+  background-image:
+    radial-gradient(circle at 8% 17%, #fff 0 1px, transparent 1.8px),
+    radial-gradient(circle at 19% 30%, #c9e7ff 0 1px, transparent 1.8px),
+    radial-gradient(circle at 31% 10%, #fff 0 1.2px, transparent 2px),
+    radial-gradient(circle at 48% 23%, #d7edff 0 1px, transparent 1.8px),
+    radial-gradient(circle at 63% 12%, #fff 0 1px, transparent 1.8px),
+    radial-gradient(circle at 78% 27%, #d7edff 0 1.2px, transparent 2px),
+    radial-gradient(circle at 91% 11%, #fff 0 1px, transparent 1.8px),
+    radial-gradient(ellipse at 78% 16%, rgb(181 220 255 / .14) 0 7%, transparent 22%),
+    linear-gradient(180deg, rgb(2 10 34 / .08), transparent 52%, rgb(2 10 20 / .12));
+}
+
+.landing-night > section:first-child > header {
+  border-color: rgb(185 221 255 / .35);
+  background: rgb(8 30 65 / .56);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .16), 0 18px 48px rgb(0 0 0 / .32);
+}
+
+.landing-night > section:first-child h1,
+.landing-night > section:first-child p {
+  text-shadow: 0 3px 30px rgb(0 0 0 / .7) !important;
+}
+
+.landing-night > section:first-child > div:last-child {
+  display: block;
+  bottom: -1px;
+  height: 15rem !important;
+  background: linear-gradient(to bottom, transparent 0%, rgb(7 16 31 / .18) 28%, rgb(7 16 31 / .68) 69%, #07101f 100%) !important;
+  backdrop-filter: none;
+}
+
+.landing-night > section:not(:first-child) {
+  background: #07101f !important;
+  border-color: rgb(150 193 224 / .16) !important;
+  color: #eaf4ff;
+}
+
+.landing-night #how > p,
+.landing-night #how + section p,
+.landing-night #questions > p,
+.landing-night #questions .text-\[\#69747a\],
+.landing-night #questions .text-\[\#7a858a\],
+.landing-night section:last-child .text-\[\#69747a\] {
+  color: rgb(192 215 232 / .76) !important;
+}
+
+.landing-night #how h2,
+.landing-night #questions h2,
+.landing-night #how + section {
+  color: #eff7ff;
+}
+
+.landing-night #how::before,
+.landing-night #how::after,
+.landing-night #how + section::before,
+.landing-night #how + section::after {
+  display: none;
+}
+
+.landing-night #how > div > div:nth-child(2) {
+  background: linear-gradient(to right, #07101f 0%, rgb(7 16 31 / .82) 7%, transparent 22%, transparent 78%, rgb(7 16 31 / .82) 93%, #07101f 100%) !important;
+}
+
+.landing-night #how img {
+  content: url("/hero-balloon-meadow-night.png");
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgb(0 0 0 / .5) 18%, #000 34%, #000 58%, rgb(0 0 0 / .78) 75%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, rgb(0 0 0 / .5) 18%, #000 34%, #000 58%, rgb(0 0 0 / .78) 75%, transparent 100%);
+}
+
+.landing-night #how > div::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: 30 !important;
+  inset: 0 !important;
+  display: block !important;
+  background: linear-gradient(to bottom, #07101f 0%, rgb(7 16 31 / .86) 12%, transparent 34%, transparent 62%, rgb(7 16 31 / .75) 82%, #07101f 100%) !important;
+}
+
+body.landing-night-active main.landing-page > #how > div:first-of-type::before {
+  content: "";
+  pointer-events: none;
+  position: absolute !important;
+  z-index: 99 !important;
+  inset: 0 !important;
+  display: block !important;
+  background: linear-gradient(to bottom, #07101f 0%, rgb(7 16 31 / .9) 13%, transparent 36%, transparent 61%, rgb(7 16 31 / .82) 82%, #07101f 100%) !important;
+}
+
+.landing-night #how > div > div:nth-child(3) {
+  background: linear-gradient(to bottom, #07101f 0%, transparent 13%, transparent 75%, rgb(7 16 31 / .78) 94%, #07101f 100%) !important;
+}
+
+.landing-night #questions {
+  background: #07101f !important;
+}
+
+.landing-night #questions button {
+  border-color: rgb(182 219 246 / .32) !important;
+  background: #ee3f78 !important;
+  color: #fff !important;
+  box-shadow: 0 10px 28px rgb(0 0 0 / .22);
+}
+
+.landing-night #questions button span {
+  background: rgb(255 255 255 / .2) !important;
+}
+
+.landing-night > section:first-child .bg-white {
+  background: #ee3f78 !important;
+  color: #fff !important;
+  box-shadow: 0 12px 28px rgb(85 8 40 / .28);
+}
+
+.landing-night > section:last-child::before {
+  background: linear-gradient(to bottom, #07101f 0%, rgb(7 16 31 / .72) 42%, transparent 100%) !important;
+  backdrop-filter: blur(5px);
+}
+
+/* Higher-specificity override for the original daylight fade. */
+body.landing-night-active main.landing-page > section:last-child::before {
+  background: linear-gradient(to bottom, #061127 0%, rgb(6 17 39 / .82) 40%, rgb(6 17 39 / .18) 72%, transparent 100%) !important;
+  backdrop-filter: none !important;
+}
+
+.landing-night > section:last-child > div:first-child {
+  background-image: url("/hero-balloon-meadow-night.png") !important;
+  filter: brightness(.94) saturate(1.02) contrast(1.03);
+}
+
+.landing-night > section:last-child > div:nth-child(2) {
+  background: linear-gradient(to bottom, rgb(4 15 39 / .64) 0%, rgb(8 29 62 / .42) 36%, rgb(4 20 35 / .16) 66%, rgb(1 8 16 / .24) 100%) !important;
+}
+
+body.landing-night-active main.landing-page > section:last-child > div:nth-child(2) {
+  background: linear-gradient(to bottom, rgb(4 15 39 / .66) 0%, rgb(8 29 62 / .42) 36%, rgb(4 20 35 / .16) 66%, rgb(1 8 16 / .24) 100%) !important;
+}
+
+.landing-night > section:last-child > div:nth-child(3) {
+  background: linear-gradient(to right, rgb(5 18 41 / .26), transparent 20%, transparent 80%, rgb(5 18 41 / .26)) !important;
+}
+
+.landing-night > section:last-child > div:nth-child(4) {
+  color: rgb(151 209 255 / .16) !important;
+}
+
+.landing-night > section:last-child .text-\[\#17202b\],
+.landing-night > section:last-child .font-\[family-name\:var\(--font-brand\)\] {
+  color: #f2f8ff !important;
+}
+
+.landing-night > section:last-child p:not(.font-semibold),
+.landing-night > section:last-child a {
+  color: rgb(210 229 244 / .78) !important;
+}
+
+.landing-night > section:last-child .font-semibold {
+  color: #f5f9ff;
+}
+
+.landing-night main,
+.landing-night .bg-white {
+  color: inherit;
 }

@@ -16,6 +16,7 @@ import { useAppStore } from "@/store/appStore";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import type { Project } from "@/types";
+import { SizzerLogo } from "@/components/brand/SizzerLogo";
 
 interface ProjectsSidebarProps {
   open: boolean;
@@ -45,14 +46,7 @@ export function ProjectsSidebar({
     <div className="flex h-full w-[260px] flex-col justify-between bg-[#0e0f12] text-white">
       {/* Top Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] px-4 py-3.5">
-        <div className="flex items-center gap-2">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-sky-500 text-xs font-bold text-white shadow-sm shadow-sky-500/30">
-            s
-          </span>
-          <span className="text-[15px] font-semibold tracking-tight text-white">
-            sizzer
-          </span>
-        </div>
+        <SizzerLogo className="text-white" iconClassName="h-8 w-8" wordmarkClassName="text-[15px]" />
         <button
           type="button"
           onClick={onToggle}

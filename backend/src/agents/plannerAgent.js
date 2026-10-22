@@ -27,16 +27,22 @@ export async function runPlannerAgent({
   // tokens, which then falls back to a generic template. Leave room for the
   // planner's real JSON response.
   const model = makeModel('planner', 0, 2048, modelOptions);
-
-  const result = await Promise.race([
-    model.invoke([
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let result;
+  try {
+    result = await model.invoke([
       new SystemMessage(PLANNER_SYSTEM),
       new HumanMessage(prompt),
-    ]),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`PlannerAgent timeout after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs)
-    ),
-  ]);
+    ], { signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`PlannerAgent timeout after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const content = result.content;
   let text;

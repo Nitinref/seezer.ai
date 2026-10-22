@@ -16,10 +16,7 @@ const PROVIDERS = [
     id: "gemini",
     label: "Google Gemini",
     models: [
-      { id: "gemini-2.0-flash",         label: "Gemini 2.0 Flash"    },
-      { id: "gemini-2.0-flash-lite",    label: "Gemini 2.0 Flash Lite" },
-      { id: "gemini-1.5-pro",           label: "Gemini 1.5 Pro"      },
-      { id: "gemini-1.5-flash",         label: "Gemini 1.5 Flash"    },
+      { id: "gemini-3.8-flash",         label: "Gemini 3.8 Flash"    },
     ],
   },
   {
@@ -33,8 +30,8 @@ const PROVIDERS = [
 
 const STORAGE_KEY = "forge_ai_provider";
 const STORAGE_MODEL_KEY = "forge_ai_model";
-const DEFAULT_PROVIDER = "openrouter";
-const DEFAULT_MODEL = "openrouter/free";
+const DEFAULT_PROVIDER = "gemini";
+const DEFAULT_MODEL = "gemini-3.8-flash";
 
 export function ModelSelector() {
   const [open, setOpen]         = useState(false);
@@ -45,10 +42,15 @@ export function ModelSelector() {
   useEffect(() => {
     const savedProvider = localStorage.getItem(STORAGE_KEY) || DEFAULT_PROVIDER;
     const savedModel = localStorage.getItem(STORAGE_MODEL_KEY) || DEFAULT_MODEL;
-    const oldModel = savedModel === "qwen/qwen-2.5-coder:free" || savedModel === "deepseek/deepseek-chat-v3-0324:free";
-    setProvider(savedProvider);
+    // Revert the temporary paid-model default so the free OpenRouter route is
+    // used unless the user explicitly changes their saved setting.
+    const oldModel = savedModel === "openai/gpt-4o-mini" || savedModel === "openrouter/free" || savedModel === "gemini-2.5-flash";
+    setProvider(oldModel ? DEFAULT_PROVIDER : savedProvider);
     setModel(oldModel ? DEFAULT_MODEL : savedModel);
-    if (oldModel) localStorage.setItem(STORAGE_MODEL_KEY, DEFAULT_MODEL);
+    if (oldModel) {
+      localStorage.setItem(STORAGE_KEY, DEFAULT_PROVIDER);
+      localStorage.setItem(STORAGE_MODEL_KEY, DEFAULT_MODEL);
+    }
   }, []);
 
   const currentProvider = PROVIDERS.find(p => p.id === provider) ?? PROVIDERS[0];

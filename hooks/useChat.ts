@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useCallback } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { chatApi } from "@/lib/api";
 import { ForgeWebSocket } from "@/lib/websocket";
@@ -15,10 +15,12 @@ const STAGE_PROGRESS: Record<string, number> = {
 };
 
 export function useChat(chatId: string | null) {
+  const qc = useQueryClient();
   const token = useAuthStore((s) => s.token);
   const {
     setIsBuilding, setBuildProgress, addPipelineEvent,
-    setPipelineEvents, setPreviewUrl, setActiveChatId, setActiveJobId, activeJobId, activeProject,
+    setPipelineEvents, setPreviewUrl, setActiveChatId, setActiveJobId,
+    activeJobId, activeProject, isBuilding,
   } = useAppStore();
   const wsRef = useRef<ForgeWebSocket | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
@@ -52,6 +54,37 @@ export function useChat(chatId: string | null) {
     if (pipelineEventsQuery.data) setPipelineEvents(pipelineEventsQuery.data);
   }, [pipelineEventsQuery.data, setPipelineEvents]);
 
+  // Hot reloads, a backend restart, or a dropped WebSocket can leave a build
+  // spinner in the Zustand store after BullMQ has already removed the job.
+  // Verify the recorded job once so the composer cannot remain locked at 0%.
+  useEffect(() => {
+    if (!isBuilding) return;
+    let cancelled = false;
+
+    const clearStaleBuild = () => {
+      if (cancelled) return;
+      activeJobIdRef.current = null;
+      setActiveJobId(null);
+      setIsBuilding(false);
+      setBuildProgress(0);
+    };
+
+    if (!activeJobId) {
+      clearStaleBuild();
+      return () => { cancelled = true; };
+    }
+
+    chatApi.jobStatus(activeJobId)
+      .then(({ state }) => {
+        if (!['active', 'waiting', 'delayed', 'prioritized', 'waiting-children'].includes(state)) {
+          clearStaleBuild();
+        }
+      })
+      .catch(clearStaleBuild);
+
+    return () => { cancelled = true; };
+  }, [activeJobId, isBuilding, setActiveJobId, setBuildProgress, setIsBuilding]);
+
   // Connect WebSocket when chatId changes
   useEffect(() => {
     if (!resolvedChatId || !token) return;
@@ -74,12 +107,31 @@ export function useChat(chatId: string | null) {
       if (event.type === "pipeline_update" && event.stage) {
         addPipelineEvent(event);
 
+        // BullMQ may retry a failed run in the background. Treat every new
+        // non-terminal pipeline stage as active and restore the job id so the
+        // visible Stop build control remains usable after that retry starts.
+        if (event.stage !== "done" && event.stage !== "error") {
+          setIsBuilding(true);
+          if (event.jobId) {
+            activeJobIdRef.current = event.jobId;
+            setActiveJobId(event.jobId);
+          }
+        }
+
         const progress = STAGE_PROGRESS[event.stage];
         if (progress !== undefined) setBuildProgress(progress);
 
         // recording the preview url whenever it's included
         if (event.previewUrl) {
           setPreviewUrl(event.previewUrl);
+        }
+
+        // File writes are persisted by the worker as soon as their tool call
+        // completes. Refresh the code/file queries immediately instead of
+        // making the user wait for the final preview and full project sync.
+        if (event.stage === "tool" && activeProject?.id) {
+          qc.invalidateQueries({ queryKey: ["project-files", activeProject.id] });
+          qc.invalidateQueries({ queryKey: ["file-content", activeProject.id] });
         }
 
         if (event.stage === "done") {
@@ -101,18 +153,21 @@ export function useChat(chatId: string | null) {
       ws.disconnect();
       wsRef.current = null;
     };
-  }, [resolvedChatId, token]);
+  }, [resolvedChatId, token, activeProject?.id, qc]);
 
   // Send message
   const sendMutation = useMutation({
     mutationFn: (message: string) =>
       chatApi.send(activeProject!.id, message),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       activeJobIdRef.current = data.jobId;
       setActiveJobId(data.jobId);
       setActiveChatId(data.chatId);
       setIsBuilding(true);
       setBuildProgress(0);
+      // The API has already persisted the prompt, so show it straight away
+      // while the worker waits for a sandbox or model response.
+      await qc.invalidateQueries({ queryKey: ["messages", data.chatId] });
       // Reconnect WS to new chatId if it changed
       if (data.chatId !== resolvedChatId) {
         setActiveChatId(data.chatId);
@@ -130,7 +185,14 @@ export function useChat(chatId: string | null) {
 
   const stopBuild = useCallback(async () => {
     const jobId = activeJobId ?? activeJobIdRef.current;
-    if (!jobId) return false;
+    // A page refresh/reconnect can leave the client showing an old build even
+    // after BullMQ has already removed its job.  Never leave the composer
+    // locked in that stale state.
+    if (!jobId) {
+      setIsBuilding(false);
+      setBuildProgress(0);
+      return true;
+    }
 
     // Make the stop control feel immediate; the server call then cancels the
     // queued or active worker safely in the background.

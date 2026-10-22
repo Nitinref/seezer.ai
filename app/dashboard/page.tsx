@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   AtSign,
   ChevronDown,
-  Folder,
   GitBranch,
   Search,
   Trash2,
@@ -19,7 +18,10 @@ import { useAuthStore } from "@/store/authStore";
 import { useAppStore } from "@/store/appStore";
 import { BorderBeam } from "border-beam";
 import { ShaderBackground } from "@/components/ui/purp-wave-shader";
+import GlassProjectFolder from "@/components/ui/glass-folder-cards";
 import AceternitySidebar from "@/components/sidebar/AceternitySidebar";
+import { SizzerLogo } from "@/components/brand/SizzerLogo";
+import { PromptModelSelector } from "@/components/chat/PromptModelSelector";
 
 function projectNameFromPrompt(prompt: string) {
   const cleaned = prompt
@@ -37,8 +39,8 @@ function ChatInput({ prompt, setPrompt, onSubmit }: { prompt: string; setPrompt:
   return <BorderBeam size="md" colorVariant="colorful" theme="dark" duration={3.2} brightness={1.7} saturation={1.5} strength={1} glowSize={1.2} className="mx-auto mt-12 w-full max-w-[760px]">
     <form onSubmit={(event) => { event.preventDefault(); onSubmit(); }} className="relative flex h-[154px] w-full flex-col rounded-[20px] bg-[#1d1d1d] p-2 font-sans tracking-[-0.01em] shadow-[inset_0_0_50px_rgba(255,255,255,.02)]">
       <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/[0.04] text-white/40"><AtSign size={16} /></div>
-      <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSubmit(); } }} rows={1} autoFocus placeholder="Build anything..." className="mt-3 min-h-8 w-full resize-none bg-transparent px-1 text-[17px] leading-6 text-white/90 outline-none placeholder:text-[17px] placeholder:text-white/45" />
-      <div className="mt-auto flex items-center gap-2"><button type="button" className="flex h-7 items-center gap-1 rounded-full bg-white/[0.05] px-2.5 text-[13px] text-white/80 hover:bg-white/10">Agent <ChevronDown size={14} className="text-white/40" /></button><button type="button" className="flex h-7 items-center gap-1 rounded-full bg-white/[0.05] px-2.5 text-[13px] text-white/80 hover:bg-white/10">Auto <ChevronDown size={14} className="text-white/40" /></button><button type="submit" disabled={!prompt.trim()} aria-label="Start building" className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-white/[0.05] text-white/55 transition hover:bg-white/10 disabled:opacity-40"><ArrowUp size={16} /></button></div>
+      <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSubmit(); } }} rows={3} autoFocus placeholder="Build anything..." className="mt-3 min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent px-1 text-[17px] leading-6 text-white/90 outline-none placeholder:text-[17px] placeholder:text-white/45" />
+      <div className="mt-auto flex items-center gap-2"><button type="button" className="flex h-7 items-center gap-1 rounded-full bg-white/[0.05] px-2.5 text-[13px] text-white/80 hover:bg-white/10">Agent <ChevronDown size={14} className="text-white/40" /></button><PromptModelSelector /><button type="submit" disabled={!prompt.trim()} aria-label="Start building" className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-white/[0.05] text-white/55 transition hover:bg-white/10 disabled:opacity-40"><ArrowUp size={16} /></button></div>
     </form>
   </BorderBeam>;
 }
@@ -60,12 +62,10 @@ function DashboardHome({ onStart, onOpenProject }: { onStart: (prompt: string) =
   return (
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#0d0e11] text-white md:flex-row">
       <AceternitySidebar onNewProject={() => setShowExisting(false)} />
-      <main className="dashboard-aurora relative isolate m-2 mt-2 min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto rounded-t-[26px] border border-white/10 bg-[#07152f] [&>header]:relative [&>header]:z-10 [&>section]:relative [&>section]:z-10">
+      <main className="dashboard-aurora relative isolate m-2 mt-2 min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto rounded-t-[26px] border border-white/10 bg-[#05070d] [&>header]:relative [&>header]:z-10 [&>section]:relative [&>section]:z-10">
         <ShaderBackground className="pointer-events-none absolute inset-0 z-0 h-full w-full" />
         <header className="relative z-10 flex items-center justify-between px-5 py-4 lg:px-8">
-          <span className="text-lg font-semibold tracking-[-0.05em] lg:hidden">
-            sizzer
-          </span>
+          <SizzerLogo className="text-white lg:hidden" iconClassName="h-7 w-7" wordmarkClassName="text-lg" />
           <div className="ml-auto flex items-center gap-3 text-sm text-white/60">
             <button className="rounded-lg border border-white/10 px-3 py-2 hover:bg-white/10">
               Help
@@ -159,10 +159,8 @@ function DashboardHome({ onStart, onOpenProject }: { onStart: (prompt: string) =
               ) : (
                 <div className="mt-10 grid gap-x-7 gap-y-12 sm:grid-cols-2 xl:grid-cols-3">
                   {filteredProjects.map((project) => (
-                    <div key={project.id} onClick={() => onOpenProject(project)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") onOpenProject(project); }} className="group cursor-pointer text-left">
-                      <div className="grid aspect-[1.7] place-items-center rounded-2xl border border-white/10 bg-[#101113] transition group-hover:border-white/30 group-hover:bg-[#17181b]">
-                        <Folder size={38} className="text-white/35" strokeWidth={1.5} />
-                      </div>
+                    <div key={project.id} className="group text-left">
+                      <GlassProjectFolder label={project.name} meta="Open project" onOpen={() => onOpenProject(project)} />
                       <div className="mt-4 flex items-center gap-2">
                         <p className="min-w-0 flex-1 truncate text-lg font-medium text-white/85">{project.name}</p>
                         <button

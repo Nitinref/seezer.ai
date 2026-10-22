@@ -102,20 +102,24 @@ export async function runReActAgent({
   emit = () => {},
   chatId = null,
   agentName = "unknown",
-  modelOptions = {}
+  modelOptions = {},
+  toolChoice,
+  signal
 }) {
   const model = makeModel(modelType, temperature, maxTokens, modelOptions);
   
   console.log(
   `[MODEL DEBUG] Agent=${agentName} | ModelType=${modelType}`
 );
-  const modelWithTools = tools.length > 0 ? model.bindTools(tools) : model;
+  const modelWithTools = tools.length > 0
+    ? model.bindTools(tools, toolChoice ? { tool_choice: toolChoice } : undefined)
+    : model;
   const toolNode = tools.length > 0 ? new ToolNode(tools) : null;
 
   const graph = new StateGraph(AgentState).addNode("agent", async (state) => {
     const msgs = compactMessages(state.messages);
 
-    const result = normalizeToolCalls(await modelWithTools.invoke(msgs));
+    const result = normalizeToolCalls(await modelWithTools.invoke(msgs, { signal }));
     return { messages: [result] };
   });
 
@@ -138,6 +142,7 @@ export async function runReActAgent({
 
   let finalState;
   let steps = 0;
+  let toolCallCount = 0;
 
   const stream = await compiled.stream(
     {
@@ -145,6 +150,7 @@ export async function runReActAgent({
     },
     {
       recursionLimit: maxSteps * 4 + 10,
+      signal,
     }
   );
 
@@ -176,6 +182,7 @@ export async function runReActAgent({
         }
 
         if (last.tool_calls?.length) {
+          toolCallCount += last.tool_calls.length;
           for (const t of last.tool_calls) {
             await emit(chatId, agentName, `🔧 Calling tool: ${t.name}`);
           }
@@ -200,6 +207,8 @@ export async function runReActAgent({
   );
 
   const content = lastAI?.content;
+
+  console.log(`[MODEL DEBUG] Agent=${agentName} | toolCalls=${toolCallCount} | steps=${steps}`);
 
   if (typeof content === "string") return content;
 

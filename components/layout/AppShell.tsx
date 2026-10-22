@@ -15,6 +15,7 @@ import { ChatPanel } from "@/components/chat/ChatPanel";
 import { CenterPanel } from "@/components/preview/CenterPanel";
 import { ProjectsSidebar } from "@/components/sidebar/ProjectsSidebar";
 import { useAppStore } from "@/store/appStore";
+import { projectsApi } from "@/lib/api";
 
 export function AppShell({
   initialPrompt,
@@ -29,7 +30,8 @@ export function AppShell({
   const [previewWidth, setPreviewWidth] = useState(70);
   const [mobilePanel, setMobilePanel] = useState<"chat" | "preview">("chat");
   const dragging = useRef(false);
-  const { activeProject, activeTab, setActiveTab } = useAppStore();
+  const { activeProject, activeTab, setActiveTab, setPreviewUrl } = useAppStore();
+  const restoredPreviewProjects = useRef(new Set<string>());
 
   useEffect(() => {
     const saved = Number(window.localStorage.getItem("sizzer.previewWidth.v3"));
@@ -64,6 +66,21 @@ export function AppShell({
   useEffect(() => {
     window.localStorage.setItem("sizzer.previewWidth.v3", String(previewWidth));
   }, [previewWidth]);
+
+  useEffect(() => {
+    if (!activeProject?.id || !activeProject.previewUrl || restoredPreviewProjects.current.has(activeProject.id)) return;
+    restoredPreviewProjects.current.add(activeProject.id);
+    let cancelled = false;
+
+    projectsApi.restorePreview(activeProject.id)
+      .then(({ previewUrl }) => { if (!cancelled) setPreviewUrl(previewUrl); })
+      .catch(() => {
+        // The previous preview stays visible if a temporary restore attempt fails.
+        // The user can still send a follow-up build, which also restores the sandbox.
+      });
+
+    return () => { cancelled = true; };
+  }, [activeProject?.id, activeProject?.previewUrl, setPreviewUrl]);
 
   const handleToggleSidebar = () => {
     setSidebarOpen((prev) => {
