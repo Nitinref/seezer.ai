@@ -402,7 +402,6 @@ function ActivityGroupHeader() {
 
 /** Compact completion card shown below the final assistant summary. */
 export function RunFileSummary({ events, onOpenFile }: { events: PipelineEvent[]; onOpenFile?: (path: string) => void }) {
-  const [showAllFiles, setShowAllFiles] = useState(false);
   const changes = useMemo(() => {
     const rows = new Map<string, { additions: number; deletions: number }>();
     for (const event of events) {
@@ -435,9 +434,6 @@ export function RunFileSummary({ events, onOpenFile }: { events: PipelineEvent[]
   const additions = changes.reduce((sum, file) => sum + file.additions, 0);
   const deletions = changes.reduce((sum, file) => sum + file.deletions, 0);
   const hasCounts = additions > 0 || deletions > 0;
-  const previewLimit = 6;
-  const visibleChanges = showAllFiles ? changes : changes.slice(0, previewLimit);
-  const hiddenCount = changes.length - previewLimit;
 
   return (
     <div className="mt-4 min-w-0 max-w-full overflow-hidden rounded-[14px] border border-white/[0.11] bg-[#111214]">
@@ -448,15 +444,14 @@ export function RunFileSummary({ events, onOpenFile }: { events: PipelineEvent[]
           {hasCounts && <p className="mt-0.5 font-mono text-[12px] tabular-nums"><span className="text-emerald-400">+{additions}</span><span className="ml-2 text-rose-400">-{deletions}</span></p>}
         </div>
       </div>
-      <div className="border-t border-white/[0.08] py-1.5">
-        {visibleChanges.map((file) => {
+      <div className="max-h-[300px] overflow-y-auto border-t border-white/[0.08] py-1.5">
+        {changes.map((file) => {
           const slash = file.path.lastIndexOf("/");
           return <button key={file.path} type="button" aria-label={`Open ${file.path}`} onClick={() => onOpenFile?.(file.path)} className={cn("grid min-h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 text-left text-[14px]", onOpenFile && "transition hover:bg-white/[0.035]")}>
             <span className="min-w-0 flex-1 truncate"><span className="text-zinc-500">{slash >= 0 ? file.path.slice(0, slash + 1) : ""}</span><span className="text-zinc-200">{slash >= 0 ? file.path.slice(slash + 1) : file.path}</span></span>
             {(file.additions > 0 || file.deletions > 0) && <span className="shrink-0 font-mono text-[11px]"><span className="text-emerald-400">+{file.additions}</span><span className="ml-2 text-rose-400">-{file.deletions}</span></span>}
           </button>;
         })}
-        {hiddenCount > 0 && <button type="button" onClick={() => setShowAllFiles((value) => !value)} className="flex min-h-10 w-full items-center justify-center border-t border-white/[0.06] px-4 text-[12px] font-medium text-zinc-400 transition hover:bg-white/[0.035] hover:text-zinc-200">{showAllFiles ? "Show fewer files" : `Show ${hiddenCount} more files`}</button>}
       </div>
     </div>
   );

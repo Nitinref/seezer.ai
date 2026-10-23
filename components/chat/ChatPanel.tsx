@@ -178,7 +178,7 @@ export function ChatPanel({ initialPrompt }: { initialPrompt?: string }) {
   const canSend = !!input.trim() && !!activeProject && !isBuilding;
 
   return (
-    <div className="relative h-full flex flex-col bg-[#1b1c1e]">
+    <div className="relative flex h-full min-h-0 flex-col bg-[#1b1c1e]">
 
       {/* Progress bar */}
       {isBuilding && (
@@ -194,7 +194,7 @@ export function ChatPanel({ initialPrompt }: { initialPrompt?: string }) {
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-5 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/20">
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-x-hidden overflow-y-auto px-5 py-5 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/20">
 
         {!activeProject && (
           <div className="flex-1 flex items-center justify-center font-mono text-[12px] text-white/20">
@@ -209,27 +209,21 @@ export function ChatPanel({ initialPrompt }: { initialPrompt?: string }) {
             : [];
           return (
           <React.Fragment key={msg.id}>
-            <MessageBubble message={msg} />
+            <div className="min-w-0 shrink-0"><MessageBubble message={msg} /></div>
             {msg.role === "user" &&
               (runsByUserMessage.get(msg.id) ?? []).map((run) => (
-                <AgentTerminal
-                  key={run[0]?.ts ?? msg.id}
-                  events={run}
-                />
+                <div key={run[0]?.ts ?? msg.id} className="min-w-0 shrink-0"><AgentTerminal events={run} /></div>
               ))}
-            {completedRuns.map((run) => <RunFileSummary key={`summary-${run[0]?.ts ?? msg.id}`} events={run} onOpenFile={openChangedFile} />)}
+            {completedRuns.map((run) => <div key={`summary-${run[0]?.ts ?? msg.id}`} className="min-w-0 shrink-0"><RunFileSummary events={run} onOpenFile={openChangedFile} /></div>)}
           </React.Fragment>
           );
         })}
 
         {unassignedRuns.map((run) => (
-          <AgentTerminal
-            key={run[0]?.ts ?? "unassigned"}
-            events={run}
-          />
+          <div key={run[0]?.ts ?? "unassigned"} className="min-w-0 shrink-0"><AgentTerminal events={run} /></div>
         ))}
 
-        <div ref={bottomRef} />
+        <div ref={bottomRef} className="shrink-0" />
       </div>
 
       {/* Input area */}
