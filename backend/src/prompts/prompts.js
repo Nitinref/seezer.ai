@@ -452,7 +452,7 @@ STACK: React 18 + JSX + Tailwind CSS + React Router + React Icons + Vite
 DIR: /app — main component: src/pages/Home.jsx
 
 Output EXACTLY this shape:
-{"summary":"","approach":"","homeComponent":"src/pages/Home.jsx","files":[{"path":"src/pages/Home.jsx","action":"update","description":""}],"newPages":[],"packages":[],"steps":[]}
+{"summary":"","approach":"","homeComponent":"src/pages/Home.jsx","files":[{"path":"src/pages/Home.jsx","action":"update","description":""}],"newPages":[],"packages":[],"steps":[],"ui":{"visualDirection":"","palette":[],"typography":"","sections":[],"interactions":[],"responsiveNotes":""}}
 
 RULES:
 - Choose a sensible component/file structure for the request.
@@ -460,6 +460,7 @@ RULES:
 - The plan must list every file the builder should create or update; do not collapse a multi-file app into Home.jsx.
 - newPages should include every route page required by the request, even when the user did not use the exact words "multiple pages".
 - packages only if not in default stack
+- ui is a concise visual brief: design direction, small palette, type treatment, section hierarchy, interactions, and mobile behavior. It must guide a premium UI, not generic Tailwind.
 - Even when the user says "homepage", plan multiple files for a meaningful app. A train booking homepage should normally include reusable search, form, card, and route-data files.
 - Only use a single page file for a genuinely tiny static page; do not collapse interactive UI into Home.jsx.
 - RAW JSON ONLY — no markdown fences, no backticks, no text before or after

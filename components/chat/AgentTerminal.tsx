@@ -401,8 +401,7 @@ function ActivityGroupHeader() {
 }
 
 /** Compact completion card shown below the final assistant summary. */
-export function RunFileSummary({ events }: { events: PipelineEvent[] }) {
-  const [showAll, setShowAll] = useState(false);
+export function RunFileSummary({ events, onOpenFile }: { events: PipelineEvent[]; onOpenFile?: (path: string) => void }) {
   const changes = useMemo(() => {
     const rows = new Map<string, { additions: number; deletions: number }>();
     for (const event of events) {
@@ -432,30 +431,28 @@ export function RunFileSummary({ events }: { events: PipelineEvent[] }) {
   }, [events]);
 
   if (!changes.length) return null;
-  const shown = showAll ? changes : changes.slice(0, 3);
   const additions = changes.reduce((sum, file) => sum + file.additions, 0);
   const deletions = changes.reduce((sum, file) => sum + file.deletions, 0);
   const hasCounts = additions > 0 || deletions > 0;
 
   return (
     <div className="mt-4 overflow-hidden rounded-[14px] border border-white/[0.11] bg-[#111214]">
-      <div className="flex items-center gap-3 border-b border-white/[0.08] px-4 py-3.5">
-        <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-[#08090a] text-zinc-400"><FileCode2 size={17} strokeWidth={1.55} /></div>
-        <div>
+      <div className="flex items-center gap-3 px-4 py-3.5">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-[#08090a] text-zinc-400"><FileCode2 size={17} strokeWidth={1.55} /></div>
+        <div className="min-w-0 flex-1">
           <p className="text-[16px] font-medium text-zinc-100">Edited {changes.length} {changes.length === 1 ? "file" : "files"}</p>
-          {hasCounts && <p className="mt-0.5 font-mono text-[12px]"><span className="text-emerald-400">+{additions}</span><span className="ml-2 text-rose-400">-{deletions}</span></p>}
+          {hasCounts && <p className="mt-0.5 font-mono text-[12px] tabular-nums"><span className="text-emerald-400">+{additions}</span><span className="ml-2 text-rose-400">-{deletions}</span></p>}
         </div>
       </div>
-      <div className="divide-y divide-white/[0.06]">
-        {shown.map((file) => {
+      <div className="border-t border-white/[0.08] py-1.5">
+        {changes.map((file) => {
           const slash = file.path.lastIndexOf("/");
-          return <div key={file.path} className="flex min-h-12 items-center gap-3 px-4 text-[15px]">
+          return <button key={file.path} type="button" title={`Open ${file.path}`} onClick={() => onOpenFile?.(file.path)} className={cn("flex min-h-11 w-full items-center gap-3 px-4 text-left text-[14px]", onOpenFile && "transition hover:bg-white/[0.035]")}>
             <span className="min-w-0 flex-1 truncate"><span className="text-zinc-500">{slash >= 0 ? file.path.slice(0, slash + 1) : ""}</span><span className="text-zinc-200">{slash >= 0 ? file.path.slice(slash + 1) : file.path}</span></span>
-            {(file.additions > 0 || file.deletions > 0) && <span className="shrink-0 font-mono text-[12px]"><span className="text-emerald-400">+{file.additions}</span><span className="ml-2 text-rose-400">-{file.deletions}</span></span>}
-          </div>;
+            {(file.additions > 0 || file.deletions > 0) && <span className="shrink-0 font-mono text-[11px]"><span className="text-emerald-400">+{file.additions}</span><span className="ml-2 text-rose-400">-{file.deletions}</span></span>}
+          </button>;
         })}
       </div>
-      {changes.length > 3 && <button type="button" onClick={() => setShowAll((value) => !value)} className="flex w-full items-center gap-1 border-t border-white/[0.06] px-4 py-2.5 text-[14px] text-zinc-400 hover:text-zinc-200">{showAll ? "Show less" : `Show ${changes.length - 3} more files`} <ChevronDown size={14} className={cn(showAll && "rotate-180")} /></button>}
     </div>
   );
 }

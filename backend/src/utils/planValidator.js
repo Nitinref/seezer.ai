@@ -23,6 +23,14 @@ const DEFAULT_PLAN = {
   newPages:      [],
   packages:      [],
   steps:         [],
+  ui: {
+    visualDirection: '',
+    palette: [],
+    typography: '',
+    sections: [],
+    interactions: [],
+    responsiveNotes: '',
+  },
 };
 
 // ── Validate a single file entry ──────────────────────────────────────────
@@ -94,6 +102,19 @@ export function validatePlan(raw) {
   if (Array.isArray(parsed.newPages))  plan.newPages  = parsed.newPages.filter((p) => typeof p === 'string');
   if (Array.isArray(parsed.packages))  plan.packages  = parsed.packages.filter((p) => typeof p === 'string');
   if (Array.isArray(parsed.steps))     plan.steps     = parsed.steps.filter((s) => typeof s === 'string');
+
+  // Persist a compact visual brief so the builder can create a deliberate UI
+  // without repeatedly rediscovering the design from the whole codebase.
+  if (parsed.ui && typeof parsed.ui === 'object') {
+    plan.ui = {
+      visualDirection: typeof parsed.ui.visualDirection === 'string' ? parsed.ui.visualDirection : '',
+      palette: Array.isArray(parsed.ui.palette) ? parsed.ui.palette.filter((v) => typeof v === 'string').slice(0, 8) : [],
+      typography: typeof parsed.ui.typography === 'string' ? parsed.ui.typography : '',
+      sections: Array.isArray(parsed.ui.sections) ? parsed.ui.sections.filter((v) => typeof v === 'string').slice(0, 12) : [],
+      interactions: Array.isArray(parsed.ui.interactions) ? parsed.ui.interactions.filter((v) => typeof v === 'string').slice(0, 8) : [],
+      responsiveNotes: typeof parsed.ui.responsiveNotes === 'string' ? parsed.ui.responsiveNotes : '',
+    };
+  }
 
   return { valid: true, plan, repaired };
 }

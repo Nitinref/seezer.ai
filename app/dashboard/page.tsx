@@ -22,6 +22,7 @@ import GlassProjectFolder from "@/components/ui/glass-folder-cards";
 import AceternitySidebar from "@/components/sidebar/AceternitySidebar";
 import { SizzerLogo } from "@/components/brand/SizzerLogo";
 import { PromptModelSelector } from "@/components/chat/PromptModelSelector";
+import type { Project } from "@/types";
 
 function projectNameFromPrompt(prompt: string) {
   const cleaned = prompt
@@ -45,13 +46,13 @@ function ChatInput({ prompt, setPrompt, onSubmit }: { prompt: string; setPrompt:
   </BorderBeam>;
 }
 
-function DashboardHome({ onStart, onOpenProject }: { onStart: (prompt: string) => void; onOpenProject: (project: any) => void }) {
+function DashboardHome({ onStart, onOpenProject }: { onStart: (prompt: string) => void; onOpenProject: (project: Project) => void }) {
   const [prompt, setPrompt] = useState("");
   const [showExisting, setShowExisting] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
   const { projects, isLoading, deleteMutation } = useProjects();
   const user = useAuthStore((state) => state.user);
-  const filteredProjects = projects.filter((project) =>
+  const filteredProjects = projects.filter((project: Project) =>
     project.name.toLowerCase().includes(projectSearch.toLowerCase()),
   );
 
@@ -158,7 +159,7 @@ function DashboardHome({ onStart, onOpenProject }: { onStart: (prompt: string) =
                 <p className="mt-10 text-white/45">No projects found.</p>
               ) : (
                 <div className="mt-10 grid gap-x-7 gap-y-12 sm:grid-cols-2 xl:grid-cols-3">
-                  {filteredProjects.map((project) => (
+                  {filteredProjects.map((project: Project) => (
                     <div key={project.id} className="group text-left">
                       <GlassProjectFolder label={project.name} meta="Open project" onOpen={() => onOpenProject(project)} />
                       <div className="mt-4 flex items-center gap-2">

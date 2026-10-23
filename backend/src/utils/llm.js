@@ -3,6 +3,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatGroq } from "@langchain/groq";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatBedrockConverse } from "@langchain/aws";
 
 /* ---------------- ENV ---------------- */
 
@@ -26,6 +27,11 @@ const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || "openrouter";
 const OPENROUTER_DEFAULT_MODEL =
   process.env.OPENROUTER_MODEL || "openrouter/free";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+const NVIDIA_DEEPSEEK_MODEL = process.env.NVIDIA_DEEPSEEK_MODEL || "deepseek-ai/deepseek-v4.1-flash";
+// Amazon Bedrock Mantle exposes an OpenAI-compatible Chat Completions API.
+// Keep the model IDs configurable: access can vary by AWS account and region.
+const BEDROCK_PLANNER_MODEL = process.env.BEDROCK_PLANNER_MODEL || "moonshotai.kimi-k2.5";
+const BEDROCK_BUILDER_MODEL = process.env.BEDROCK_BUILDER_MODEL || "qwen.qwen3-coder-next";
 
 const GROQ_PLANNER_MODEL = process.env.GROQ_PLANNER_MODEL || "qwen/qwen3.8-27b";
 const GROQ_BUILDER_MODEL = process.env.GROQ_BUILDER_MODEL || "qwen/qwen3.8-27b";
@@ -43,6 +49,8 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+const BEDROCK_API_KEY = process.env.BEDROCK_API_KEY || process.env.AWS_BEARER_TOKEN_BEDROCK;
 
 // OpenRouter Config
 const OPENROUTER_BASE_URL =
@@ -54,6 +62,10 @@ const OPENROUTER_APP_URL =
 
 const OPENROUTER_APP_NAME =
   process.env.OPENROUTER_APP_NAME || "Seezer.ai";
+
+const NVIDIA_NIM_BASE_URL = process.env.NVIDIA_NIM_BASE_URL || "https://integrate.api.nvidia.com/v1";
+const BEDROCK_REGION = process.env.BEDROCK_REGION || "us-east-1";
+const BEDROCK_BASE_URL = process.env.BEDROCK_BASE_URL || `https://bedrock-mantle.${BEDROCK_REGION}.api.aws/v1`;
 
 /* ---------------- TIMEOUTS ---------------- */
 
@@ -159,6 +171,36 @@ function createGeminiModel(model, temperature = 0.2, maxTokens = 2048) {
   });
 }
 
+function createNvidiaModel(model, temperature = 0.2, maxTokens = 2048, timeout = REQUEST_TIMEOUT_MS) {
+  if (!NVIDIA_API_KEY) throw new Error("NVIDIA_API_KEY missing");
+  return new ChatOpenAI({
+    model,
+    apiKey: NVIDIA_API_KEY,
+    temperature,
+    maxTokens,
+    timeout,
+    maxRetries: 0,
+    configuration: { baseURL: NVIDIA_NIM_BASE_URL },
+  });
+}
+
+function createBedrockModel(model, temperature = 0.2, maxTokens = 2048, timeout = REQUEST_TIMEOUT_MS) {
+  if (!BEDROCK_API_KEY) {
+    throw new Error("BEDROCK_API_KEY (or AWS_BEARER_TOKEN_BEDROCK) missing");
+  }
+  // Native Bedrock Converse avoids the OpenAI-compatible Mantle translation
+  // layer, which was producing slow or malformed tool-call payloads for Qwen.
+  // The AWS SDK understands Bedrock bearer API keys directly.
+  return new ChatBedrockConverse({
+    model,
+    region: BEDROCK_REGION,
+    bedrockBearerToken: BEDROCK_API_KEY,
+    temperature,
+    maxTokens,
+    streaming: false,
+  });
+}
+
 /* ---------------- MAIN FACTORY ---------------- */
 
 export function makeModel(
@@ -174,7 +216,12 @@ export function makeModel(
   const timeout = agentType === "planner"
     ? PLANNER_TIMEOUT_MS
     : agentType === "builder"
-      ? Math.min(BUILDER_TIMEOUT_MS, 60_000)
+      // NVIDIA's free DeepSeek endpoint can take longer than a minute to
+      // begin a sizeable tool-call response. Keep its request alive for the
+      // builder's full bounded agent window.
+      ? ["nvidia", "bedrock"].includes(selectedProvider)
+        ? Math.min(BUILDER_TIMEOUT_MS, 180_000)
+        : Math.min(BUILDER_TIMEOUT_MS, 60_000)
       : agentType === "validator"
         ? VALIDATOR_TIMEOUT_MS
         : CHECKER_TIMEOUT_MS;
@@ -192,6 +239,17 @@ export function makeModel(
 
   if (selectedProvider === "gemini") {
     return createGeminiModel(options.model || GEMINI_MODEL, temperature, maxTokens);
+  }
+
+  if (selectedProvider === "nvidia") {
+    return createNvidiaModel(options.model || NVIDIA_DEEPSEEK_MODEL, temperature, maxTokens, timeout);
+  }
+
+  if (selectedProvider === "bedrock") {
+    const bedrockModel = options.model || (agentType === "planner"
+      ? BEDROCK_PLANNER_MODEL
+      : BEDROCK_BUILDER_MODEL);
+    return createBedrockModel(bedrockModel, temperature, maxTokens, timeout);
   }
 
   if (selectedProvider === "openrouter") {
@@ -255,6 +313,9 @@ export {
   GROQ_VALIDATOR_MODEL,
   GROQ_CHECKER_MODEL,
   GEMINI_MODEL,
+  NVIDIA_DEEPSEEK_MODEL,
+  BEDROCK_PLANNER_MODEL,
+  BEDROCK_BUILDER_MODEL,
   GROQ_PLANNER_MODEL,
   GROQ_BUILDER_MODEL,
   AGENT_PROVIDERS,

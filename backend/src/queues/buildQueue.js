@@ -4,7 +4,10 @@ import { bullConnection } from '../redis/index.js';
 export const buildQueue = new Queue('website-builds', {
   connection: bullConnection,
   defaultJobOptions: {
-    attempts: 3,
+    // A build must never replay expensive model calls several times. The
+    // worker discards provider, credit, and code failures; this single retry
+    // is reserved for transient network/sandbox failures only.
+    attempts: 2,
     backoff: {
       type: 'exponential',
       delay: 5000,

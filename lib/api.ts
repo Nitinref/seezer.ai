@@ -42,6 +42,11 @@ export const authApi = {
     apiClient.get<{ user: AuthResponse["user"] }>("/auth/me").then((r) => r.data.user),
 };
 
+export const creditsApi = {
+  balance: () =>
+    apiClient.get<{ balanceUsd: number }>("/auth/credits").then((r) => r.data.balanceUsd),
+};
+
 export const projectsApi = {
   list: () =>
     apiClient.get<{ projects: Project[] }>("/projects").then((r) => r.data.projects),

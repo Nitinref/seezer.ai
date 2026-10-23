@@ -104,15 +104,22 @@ export async function runReActAgent({
   agentName = "unknown",
   modelOptions = {},
   toolChoice,
-  signal
+  stopAfterTool = false,
+  signal,
+  onUsage = async () => {}
 }) {
   const model = makeModel(modelType, temperature, maxTokens, modelOptions);
   
   console.log(
   `[MODEL DEBUG] Agent=${agentName} | ModelType=${modelType}`
 );
+  // Bedrock Converse handles tools natively but model support for forced
+  // tool-choice is model-specific. The Builder prompt still requires the
+  // write tool; avoid passing an OpenAI-only force directive to Bedrock.
   const modelWithTools = tools.length > 0
-    ? model.bindTools(tools, toolChoice ? { tool_choice: toolChoice } : undefined)
+    ? model.bindTools(tools, toolChoice && modelOptions.provider !== 'bedrock'
+      ? { tool_choice: toolChoice }
+      : undefined)
     : model;
   const toolNode = tools.length > 0 ? new ToolNode(tools) : null;
 
@@ -133,7 +140,21 @@ export async function runReActAgent({
         const last = state.messages.at(-1);
         return last?.tool_calls?.length > 0 ? "tools" : END;
       })
-      .addEdge("tools", "agent");
+      .addConditionalEdges("tools", (state) => {
+        // A boolean preserves the recovery path's historical behaviour: stop
+        // after its one compulsory tool call. A list only ends the loop after
+        // one of those named tools, so an initial read can still be followed
+        // by the planned atomic write.
+        if (stopAfterTool === true) return END;
+        if (Array.isArray(stopAfterTool)) {
+          const lastToolRequest = [...state.messages].reverse().find(
+            (message) => Array.isArray(message?.tool_calls) && message.tool_calls.length > 0
+          );
+          const wroteFiles = lastToolRequest?.tool_calls?.some((call) => stopAfterTool.includes(call.name));
+          if (wroteFiles) return END;
+        }
+        return "agent";
+      });
   } else {
     graph.addEdge(START, "agent").addEdge("agent", END);
   }
@@ -149,7 +170,12 @@ export async function runReActAgent({
       messages: [new SystemMessage(systemPrompt), new HumanMessage(userPrompt)],
     },
     {
-      recursionLimit: maxSteps * 4 + 10,
+      // A graph turn is either an agent response or a tool execution. The
+      // old limit (4x + 10) quietly allowed many extra read/think loops.
+      // Three useful tool calls (read → write → targeted polish) require
+      // seven graph nodes plus the terminating edge. Keep one small buffer
+      // for that final completion turn without reopening an unbounded loop.
+      recursionLimit: Math.max(4, maxSteps * 2 + 3),
       signal,
     }
   );
@@ -171,6 +197,11 @@ export async function runReActAgent({
 
      
       if (type === "ai" || type === "AIMessage") {
+        const usage = last.usage_metadata
+          ?? last.response_metadata?.usage_metadata
+          ?? last.response_metadata?.usage
+          ?? last.response_metadata?.usageMetadata;
+        if (usage) await onUsage(usage);
         let text = "";
 
         if (typeof last.content === "string") text = last.content;

@@ -9,6 +9,11 @@ const BUILDER_SYSTEM = `You are the coding agent for an existing React applicati
 
 Your task is to implement the user's request using the validated build plan and the available project tools.
 
+The plan may contain a UI brief. Treat it as the source of truth for visual
+direction: create a polished, responsive interface with intentional hierarchy,
+typography, spacing, and interaction states. For substantial experiences,
+prefer a small set of focused components over a generic one-file mockup.
+
 Rules:
 - Do not call get_context or list_directory. The project context and validated plan are already provided.
 - If necessary, inspect the relevant source files in one read_multiple_files call. Do not repeatedly inspect files.
@@ -31,11 +36,18 @@ export async function runBuilderAgent({
   chatId,
   modelOptions = {},
   repair = false,
+  polish = false,
   compactFallback = false,
   forceWriteTool = false,
+  onUsage,
 }) {
   let readCalls = 0;
   let wroteFiles = false;
+  let writeCalls = 0;
+  // Bedrock Qwen has high latency between ReAct turns. For normal builds,
+  // give it only the one atomic write path so it cannot spend a full model
+  // request reading and then another one deciding to write.
+  const bedrockFastPath = modelOptions.provider === 'bedrock' && !polish;
   // Never let an agent continue consuming requests after the UI has received
   // a timeout. The old Promise.race left the LangGraph loop alive in the
   // background, which quickly exhausted free-tier Gemini quota.
@@ -46,7 +58,8 @@ export async function runBuilderAgent({
 
   const builderTools = tools
     .filter((tool) =>
-      !['get_context', 'list_directory', 'save_context'].includes(tool.name)
+      !['get_context', 'list_directory', 'save_context'].includes(tool.name) &&
+      !(bedrockFastPath && READ_TOOLS.has(tool.name))
     )
     .map((tool) => new Proxy(tool, {
       get(target, property) {
@@ -60,8 +73,21 @@ export async function runBuilderAgent({
             readCalls += 1;
           }
 
+          // Recovery builds intentionally produce the complete UI in one
+          // write_multiple_files request. Prevent an agent from overwriting
+          // that finished implementation with an incomplete follow-up pass.
+          if (compactFallback && WRITE_TOOLS.has(target.name) && writeCalls >= 1) {
+            return 'Recovery mode accepts exactly one successful write. Review the existing result and return your summary without modifying files.';
+          }
+
           const result = await Reflect.apply(invoke, target, [input, ...args]);
+          if (WRITE_TOOLS.has(target.name) && String(result).startsWith('Tool error:')) {
+            // Keep provider/tool failures observable without logging model
+            // source payloads or entire generated files.
+            console.warn(`[BuilderAgent] ${target.name} rejected: ${String(result).slice(0, 300)}`);
+          }
           if (WRITE_TOOLS.has(target.name) && !String(result).startsWith('Tool error:')) {
+            writeCalls += 1;
             wroteFiles = true;
           }
           return result;
@@ -69,11 +95,16 @@ export async function runBuilderAgent({
       },
     }));
 
-  const userPrompt = `${repair
+  const userPrompt = `${polish
+    ? 'Review the implementation against the UI direction below. Inspect the relevant source files once, then make a focused visual-polish edit. Improve hierarchy, spacing, responsive behavior, states, and consistency. Preserve working functionality and do not rewrite unrelated code.'
+    : repair
     ? 'The previous attempt did not write any project files. Immediately write the complete implementation; do not inspect files or explain first.'
     : 'Implement the validated plan now. Inspect relevant files at most once, then write the implementation.'}
 ${compactFallback
   ? '\nRECOVERY MODE: Write a complete, working UI in exactly one write_multiple_files call using only src/App.jsx and src/index.css. Do not create components, hooks, pages, data, or utility files. Keep it self-contained so the tool arguments are never truncated.'
+  : ''}
+${bedrockFastPath
+  ? '\nFAST BEDROCK MODE: Do not inspect files. Immediately make exactly one write_multiple_files call containing every complete file required by the validated plan. Then stop. Do not call any other tool or provide a preamble.'
   : ''}
 
 Validated build plan:
@@ -93,8 +124,14 @@ ${userMessage}`;
       temperature: 0.2,
       // The model needs room to make tool calls, not to narrate code. A
       // smaller response cap keeps normal builds responsive.
-      maxTokens: repair ? 2048 : 3072,
-      maxSteps: repair ? 2 : 4,
+      // A compact recovery still writes a complete App.jsx plus stylesheet.
+      // 2–4K output tokens can cut the JSON tool arguments mid-file, which
+      // LangChain reports as an invalid/truncated tool call. Give only this
+      // write-first path enough room to finish its single atomic write.
+      maxTokens: compactFallback || bedrockFastPath ? 8192 : repair ? 4096 : polish ? 2560 : 4096,
+      // Implement and polish each get an intentional inspect/write/complete
+      // budget instead of an open-ended ReAct loop.
+      maxSteps: repair ? 2 : 3,
       modelType: 'builder',
       agentName: 'builder',
       modelOptions,
@@ -103,16 +140,54 @@ ${userMessage}`;
       // The repair tool set includes write_multiple_files. Pinning that one
       // call keeps a recovery build compact and avoids burning free-tier
       // requests by creating files individually.
-      toolChoice: repair || forceWriteTool ? 'write_multiple_files' : undefined,
+      // Bedrock Qwen is fast when it sends the whole project as one atomic
+      // write, but can otherwise create files one at a time. Pin the tool so
+      // new builds need one request and one tool execution, not a slow chain.
+      toolChoice: repair || forceWriteTool || modelOptions.provider === 'bedrock'
+        ? 'write_multiple_files'
+        : undefined,
+      // Qwen Coder writes the full app atomically but can then leave a slow
+      // follow-up turn open only to narrate a summary. Let it inspect first,
+      // but terminate immediately after the first successful file write.
+      // Compact recovery still stops after its mandatory one tool call.
+      stopAfterTool: compactFallback && forceWriteTool
+        ? true
+        : modelOptions.provider === 'bedrock'
+          ? [...WRITE_TOOLS]
+          : false,
       // The worker already emits the real tool results. Suppress LangGraph's
       // internal node/thought events so they do not create noisy DB writes.
       emit: () => {},
       signal: controller.signal,
+      onUsage,
     });
-    return { output, wroteFiles };
+    const compactSummary = (compactFallback || modelOptions.provider === 'bedrock') && wroteFiles
+      ? 'Implemented the requested interface and wrote the project files.'
+      : output;
+    return { output: compactSummary, wroteFiles };
   } catch (error) {
     if (controller.signal.aborted) {
+      // Tool writes are atomic. If the model times out while attempting a
+      // non-essential follow-up response, preserve the completed files and
+      // let deterministic verification decide whether the build is usable.
+      if (wroteFiles) {
+        return { output: 'Implementation files were written before the builder timed out; continuing with verification.', wroteFiles: true };
+      }
       throw new Error(`BuilderAgent timeout after ${effectiveTimeoutMs / 1000}s`);
+    }
+    // The implementation may already be safely written when a provider rate
+    // limit hits the final “summarise/continue” model turn. Do not discard a
+    // real file write just because that non-essential response was rejected;
+    // the worker will run deterministic build verification next.
+    if (wroteFiles && /(?:\b429\b|rate.?limit|quota)/i.test(String(error?.message ?? error))) {
+      return { output: 'Implementation files were written; continuing with verification.', wroteFiles: true };
+    }
+    // Some OpenRouter free routes repeatedly emit incomplete/unsupported tool
+    // calls until LangGraph reaches its cap. Let the worker use its existing
+    // forced write-only recovery pass instead of failing the entire job or
+    // raising the cap and spending even more model turns.
+    if (!wroteFiles && /recursion limit/i.test(String(error?.message ?? error))) {
+      return { output: 'Builder reached its tool-turn budget before writing files.', wroteFiles: false };
     }
     throw error;
   } finally {

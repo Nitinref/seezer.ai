@@ -19,9 +19,13 @@ import {
   GROQ_PLANNER_MODEL,
   GROQ_BUILDER_MODEL,
   GEMINI_MODEL,
+  NVIDIA_DEEPSEEK_MODEL,
+  BEDROCK_PLANNER_MODEL,
+  BEDROCK_BUILDER_MODEL,
   AGENT_PROVIDERS
 } from '../utils/llm.js';
 import prisma from '../db/index.js';
+import { chargeUsageBatch, enforceMinimumBuildCharge } from '../services/credits.js';
 
 
 import { runPlannerAgent } from '../agents/plannerAgent.js';
@@ -68,6 +72,14 @@ function fallbackPlanForRequest(prompt = '') {
         { path: 'src/data/trains.js', action: 'create', description: 'Train and route data.' },
       ],
       newPages: [], packages: [], steps: ['Build components', 'Wire Home.jsx', 'Verify the project'],
+      ui: {
+        visualDirection: 'Trustworthy, high-utility travel interface with clear search-first hierarchy.',
+        palette: ['deep blue', 'white', 'warm accent'],
+        typography: 'Clear, information-dense headings with highly legible booking details.',
+        sections: ['navigation', 'search panel', 'train results', 'route details', 'footer'],
+        interactions: ['search controls', 'result selection', 'responsive navigation'],
+        responsiveNotes: 'Search and result cards must stack cleanly on mobile.',
+      },
     };
   }
   return {
@@ -81,7 +93,33 @@ function fallbackPlanForRequest(prompt = '') {
       { path: 'src/data/content.js', action: 'create', description: 'Page data and constants.' },
     ],
     newPages: [], packages: [], steps: ['Build components', 'Wire Home.jsx', 'Verify the project'],
+    ui: {
+      visualDirection: 'A distinctive, polished product interface tailored to the request.',
+      palette: [], typography: '', sections: [], interactions: [],
+      responsiveNotes: 'Preserve hierarchy and usability on narrow screens.',
+    },
   };
+}
+
+function needsUiPolish(prompt, plan) {
+  const uiRequest = /(?:landing|homepage|dashboard|website|web app|page|screen|ui|design|portfolio|store|booking|saas|hero|responsive)/i.test(prompt);
+  const plannedExperience = (plan?.files?.length ?? 0) >= 3 || (plan?.ui?.sections?.length ?? 0) >= 3;
+  return uiRequest && plannedExperience;
+}
+
+function isRecoveryRequest(message = '') {
+  return /\b(?:fix|repair|retry|continue|resume|correct|resolve)\b|\b(?:thik|sahi|dobara|aage)\b/i.test(message);
+}
+
+function isPreviewRequest(message = '') {
+  return /\b(?:show|give|open|provide|start|see)\b.*\b(?:preview|live preview)\b|\b(?:preview|live preview)\b/i.test(message);
+}
+
+function isRetryableBuildFailure(error) {
+  const message = String(error?.message ?? error).toLowerCase();
+  return message.includes('econnreset') || message.includes('etimedout') ||
+    message.includes('fetch failed') || message.includes('network error') ||
+    message.includes('sandbox') || message.includes('e2b');
 }
 async function withRetry(fn, maxRetries = 1, label = '') {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -111,7 +149,8 @@ function isReviewAgentFailure(err) {
   const msg = String(err?.message ?? err).toLowerCase();
   return msg.includes('429') || msg.includes('rate limit') || msg.includes('rate_limit') ||
     msg.includes('free-models-per-day') || msg.includes('overloaded') ||
-    msg.includes('timeout after');
+    msg.includes('timeout after') || msg.includes('recursion limit') ||
+    msg.includes('invalid or truncated tool call');
 }
 
 async function emit(chatId, stage, message, extra = {}) {
@@ -324,6 +363,13 @@ function changedProjectPaths(toolName, args, result) {
   )];
 }
 
+function databaseSafeContent(content) {
+  // PostgreSQL text values cannot contain NUL. An interrupted or malformed
+  // model tool argument must not prevent the rest of a valid project from
+  // being persisted and restored after a sandbox expires.
+  return String(content ?? '').replace(/\u0000/g, '');
+}
+
 async function syncToolChanges(projectId, toolName, args, result) {
   const paths = changedProjectPaths(toolName, args, result);
   if (!paths.length) return;
@@ -336,10 +382,11 @@ async function syncToolChanges(projectId, toolName, args, result) {
   const sandbox = await getOrCreateSandbox(projectId);
   await Promise.all(paths.map(async (path) => {
     const content = await sandbox.files.read(`/app/${path}`);
+    const storedContent = databaseSafeContent(content);
     await prisma.projectFile.upsert({
       where: { projectId_path: { projectId, path } },
-      update: { content },
-      create: { projectId, path, content },
+      update: { content: storedContent },
+      create: { projectId, path, content: storedContent },
     });
   }));
 }
@@ -479,8 +526,8 @@ async function syncProjectFiles(sb, projectId, logger) {
     await Promise.all(allFiles.map(({ path, content }) =>
       prisma.projectFile.upsert({
         where: { projectId_path: { projectId, path } },
-        update: { content },
-        create: { projectId, path, content },
+        update: { content: databaseSafeContent(content) },
+        create: { projectId, path, content: databaseSafeContent(content) },
       }).catch((e) => logger._log('warn', `Upsert failed: ${path}`, { err: e.message }))
     ));
     logger._log('info', `Synced ${allFiles.length} files`, { projectId });
@@ -492,18 +539,50 @@ async function syncProjectFiles(sb, projectId, logger) {
 }
 
 async function processBuildJob(job) {
-  const { chatId, projectId, userMessage, previousMessages, provider, model } = job.data;
+  const { chatId, projectId, userId: queuedUserId, userMessage, previousMessages, provider, model } = job.data;
   activeBuildJobsByChat.set(chatId, String(job.id));
-  const modelOptions = ['openrouter', 'gemini'].includes(provider) ? { provider, model } : {};
+  const modelOptions = ['openrouter', 'gemini', 'nvidia', 'bedrock'].includes(provider) ? { provider, model } : {};
   const previousProgress = job.progress && typeof job.progress === 'object' ? job.progress : {};
   const resumeStage = previousProgress.stage || null;
   const isRetryResume = job.attemptsMade > 0 && Boolean(resumeStage);
   const stageRank = { planned: 1, built: 2, validated: 3, checked: 4 };
   const hasCheckpoint = (stage) => isRetryResume && (stageRank[resumeStage] || 0) >= stageRank[stage];
   const logger = new PipelineLogger(chatId, job.id);
+  const pendingUsage = [];
+  let chatOwner = null;
   logger.startStage('pipeline');
 
+  const flushPendingUsage = async () => {
+    if (!chatOwner || pendingUsage.length === 0) return;
+    const usages = pendingUsage.splice(0, pendingUsage.length);
+    try {
+      const charge = await chargeUsageBatch({ userId: chatOwner.userId, jobId: job.id, usages });
+      if (charge.chargedUsd > 0) logger._log('info', 'AI usage charged', { entries: charge.entries, chargedUsd: charge.chargedUsd, balanceUsd: charge.balanceUsd });
+    } catch (error) {
+      // Billing availability must not discard completed/generated work.
+      logger._log('warn', 'Deferred AI usage charge failed', { error: error?.message ?? String(error) });
+    }
+  };
+
   try {
+    chatOwner = queuedUserId
+      ? { userId: queuedUserId }
+      : await prisma.chat.findUnique({ where: { id: chatId }, select: { userId: true } });
+    if (!chatOwner) {
+      logger._log('warn', 'Discarding orphaned build job: chat no longer exists.');
+      activeBuildJobsByChat.delete(chatId);
+      return { discarded: true, reason: 'chat_deleted' };
+    }
+    const billUsage = (agent, options = {}) => async (usage) => {
+      const activeProvider = options.provider ?? AGENT_PROVIDERS[agent] ?? 'openrouter';
+      const activeModel = options.model ?? (activeProvider === 'gemini' ? GEMINI_MODEL : activeProvider === 'nvidia'
+        ? NVIDIA_DEEPSEEK_MODEL : activeProvider === 'groq'
+          ? (agent === 'planner' ? GROQ_PLANNER_MODEL : GROQ_BUILDER_MODEL)
+          : activeProvider === 'bedrock'
+            ? (agent === 'planner' ? BEDROCK_PLANNER_MODEL : BEDROCK_BUILDER_MODEL)
+          : undefined);
+      pendingUsage.push({ agent, provider: activeProvider, model: activeModel, usage });
+    };
     // A cancelled job must be handled below rather than escape before this
     // try/catch; otherwise BullMQ retries the same cancellation as a failure.
     await throwIfBuildStopped(job);
@@ -599,15 +678,84 @@ export default defineConfig({
       if (saved?.plan && Array.isArray(saved.plan.files)) savedPlan = saved.plan;
     } catch { }
 
+    // A follow-up request must be treated as an edit to the current project,
+    // even if the last build ended after writing files but before producing a
+    // final assistant message. Send a compact durable map, never the whole
+    // source tree; the Builder reads the relevant files itself.
+    let projectFilePaths = [];
+    try {
+      projectFilePaths = (await prisma.projectFile.findMany({
+        where: { projectId }, select: { path: true }, orderBy: { path: 'asc' }, take: 80,
+      })).map((file) => file.path);
+    } catch { }
+
     const trimmedHistory = previousMessages
       .filter((m) => ['user', 'assistant'].includes(m.role))
       .slice(-6)
       .map((m) => `${m.role.toUpperCase()}: ${m.content.slice(0, 200)}`)
       .join('\n');
 
-    const fullPrompt = trimmedHistory
-      ? `Previous context:\n${trimmedHistory}\n\nRequest: ${userMessage}`
-      : userMessage;
+    const hasPriorProjectContext = previousMessages.length > 0 || Boolean(savedPlan);
+    const previousPlanBrief = savedPlan ? JSON.stringify({
+      summary: savedPlan.summary,
+      approach: savedPlan.approach,
+      files: savedPlan.files?.map((file) => file.path),
+      ui: savedPlan.ui,
+    }) : '';
+    const continuationContext = hasPriorProjectContext
+      ? `This is a follow-up to an existing project. Preserve the current implementation and make an incremental change; do not recreate the app from scratch.\nPersisted project files: ${projectFilePaths.join(', ') || '(files will be inspected in the sandbox)'}${previousPlanBrief ? `\nPrevious build brief: ${previousPlanBrief}` : ''}`
+      : '';
+    const fullPrompt = [
+      continuationContext,
+      trimmedHistory ? `Previous conversation:\n${trimmedHistory}` : '',
+      `Request: ${userMessage}`,
+    ].filter(Boolean).join('\n\n');
+
+    // “Show me the preview” is a deterministic project operation, not a new
+    // design request. Verify the persisted implementation and serve it
+    // directly—no planner or builder model call, so no accidental rewrite.
+    if (isPreviewRequest(userMessage)) {
+      if (!savedPlan && previousMessages.length === 0) {
+        const summary = 'There is no generated implementation to preview yet. Build the requested app first.';
+        await emit(chatId, 'preview', summary);
+        await prisma.message.create({
+          data: { chatId, role: 'assistant', content: summary, metadata: { jobId: job.id, previewOnly: true } },
+        }).catch(() => {});
+        activeBuildJobsByChat.delete(chatId);
+        return { previewUrl: null, summary, previewOnly: true };
+      }
+
+      await emit(chatId, 'checking', 'Checking the existing files before opening the preview…');
+      const checkRaw = await toolMap.verify_project.execute({});
+      await emit(chatId, 'tool', JSON.stringify({
+        ...publicToolDetails('verify_project', checkRaw), args: {},
+      }));
+      let check = null;
+      try { check = JSON.parse(checkRaw); } catch { }
+
+      if (check?.success === true) {
+        const previewUrl = await startPreviewServer(sb, projectId, chatId, logger);
+        await syncProjectFiles(sb, projectId, logger);
+        const summary = previewUrl
+          ? 'Your existing implementation is buildable. Preview is ready.'
+          : 'Your existing implementation is buildable, but the preview server could not be started.';
+        await prisma.message.create({
+          data: { chatId, role: 'assistant', content: summary, metadata: { jobId: job.id, previewUrl, previewOnly: true } },
+        }).catch(() => {});
+        await job.updateProgress(100);
+        await emit(chatId, 'done', summary, { previewUrl, previewOnly: true });
+        activeBuildJobsByChat.delete(chatId);
+        return { previewUrl, summary, previewOnly: true };
+      }
+
+      const summary = 'The existing files are not buildable yet, so I did not open a broken preview. Say “fix it” to resume the previous plan and repair them.';
+      await emit(chatId, 'preview', summary);
+      await prisma.message.create({
+        data: { chatId, role: 'assistant', content: summary, metadata: { jobId: job.id, previewOnly: true, buildable: false } },
+      }).catch(() => {});
+      activeBuildJobsByChat.delete(chatId);
+      return { previewUrl: null, summary, previewOnly: true, buildable: false };
+    }
 
 
     const MAX_REPLANS = 2;
@@ -616,7 +764,11 @@ export default defineConfig({
     let lastError = null;
     let checkOutput = null;
     let builderSummary = '';
-    let planObj = null;
+    // A user saying “fix it” after a failed build should resume the Builder
+    // with the exact last validated plan and persisted source files—not spend
+    // another planning turn and risk recreating the app from scratch.
+    const resumeFailedBuild = Boolean(savedPlan) && isRecoveryRequest(userMessage);
+    let planObj = resumeFailedBuild ? savedPlan : null;
     let previewUrl = null;
 
     if (hasCheckpoint('planned')) {
@@ -634,7 +786,7 @@ export default defineConfig({
       buildFailed = false;
       const isReplan = replanCount > 0;
 
-      const resumePlanner = hasCheckpoint('planned') && !isReplan;
+      const resumePlanner = (hasCheckpoint('planned') || resumeFailedBuild) && !isReplan;
 
       // ── STEP 2: PlannerAgent ──────────────────────────────────────────
       if (!resumePlanner) {
@@ -656,7 +808,8 @@ export default defineConfig({
   prompt: planPrompt,
   emit,
   chatId,
-  modelOptions
+  modelOptions,
+  onUsage: billUsage('planner', modelOptions)
 }), 1, 'PlannerAgent');
         await throwIfBuildStopped(job);
 
@@ -669,6 +822,7 @@ export default defineConfig({
             emit,
             chatId,
             modelOptions,
+            onUsage: billUsage('planner', modelOptions),
           });
         }
         logger.endStage('PlannerAgent');
@@ -680,7 +834,7 @@ export default defineConfig({
         logger._log('warn', 'PlannerAgent failed', { error: err?.message ?? String(err), provider });
 
         const activePlannerProvider = modelOptions.provider ?? AGENT_PROVIDERS.planner;
-        if (['openrouter', 'gemini'].includes(activePlannerProvider)) {
+        if (['openrouter', 'gemini', 'bedrock'].includes(activePlannerProvider)) {
           try {
             await emit(chatId, 'planning', 'Planner is taking too long; retrying with a faster model…');
             planOutput = await runPlannerAgent({
@@ -688,6 +842,7 @@ export default defineConfig({
               emit,
               chatId,
               modelOptions: { provider: 'groq' },
+              onUsage: billUsage('planner', { provider: 'groq' }),
               timeoutMs: 45_000,
             });
             logger.endStage('PlannerAgent', { recoveredWith: 'groq' });
@@ -705,7 +860,6 @@ export default defineConfig({
           logger.endStage('PlannerAgent', { fallback: true });
         }
       }
-
       await job.updateProgress({ percent: 25 + replanCount * 5, stage: 'planned' });
 
       const { valid, plan, repaired, error: planError } = validatePlan(planOutput);
@@ -724,13 +878,23 @@ export default defineConfig({
 
       try {
         await toolMap.save_context.execute({
+          key: 'builder',
           context: JSON.stringify({ plan: planObj, replanCount, lastError }),
         });
       } catch { }
       }
+      else if (resumeFailedBuild) {
+        await emit(chatId, 'planning', 'Resuming the previous build plan and repairing the existing files.', { plan: planObj });
+      }
 
       
       const resumeBuilder = hasCheckpoint('built') && !isReplan;
+      // Job-level provider selection is optional. Always pass the resolved
+      // builder provider through to BuilderAgent so provider-specific modes
+      // (Bedrock's one-turn write path) also apply to default builds.
+      const builderModelOptions = modelOptions.provider
+        ? modelOptions
+        : { provider: AGENT_PROVIDERS.builder };
       if (!resumeBuilder) {
       await throwIfBuildStopped(job);
       await emit(chatId, 'building',
@@ -742,17 +906,16 @@ export default defineConfig({
         // Honour the provider/model chosen for this job. Gemini is the primary
         // builder, with Groq/Qwen as a recovery path for quota, timeout, or
         // provider-tool-call failures.
-        const builderModelOptions = modelOptions;
         const runBuildPass = async (options, label, compactFallback = false) => {
           const activeProvider = options.provider ?? AGENT_PROVIDERS.builder;
-          // Do not leave the UI stuck on a Gemini tool-call request. If it
-          // has not responded within 45 seconds, switch to the Qwen fallback
-          // while the project is still in a clean, buildable state.
-          const timeoutMs = activeProvider === 'gemini' ? 45_000 : undefined;
+          // Gemini can take longer to prepare a complete tool-call response.
+          // Give it the same bounded window as the builder agent before
+          // switching to the recovery provider.
+          const timeoutMs = ['gemini', 'bedrock'].includes(activeProvider) ? 180_000 : undefined;
           // A retry against an overloaded free Gemini endpoint only makes the
           // UI appear stuck and can consume the remaining quota. Hand control
           // to Qwen immediately; other providers retain one bounded retry.
-          const retries = activeProvider === 'gemini' ? 0 : 1;
+          const retries = ['gemini', 'bedrock'].includes(activeProvider) ? 0 : 1;
           let result = await withRetry(
             () => runBuilderAgent({
               plan: planObj,
@@ -761,6 +924,7 @@ export default defineConfig({
               emit,
               chatId,
               modelOptions: options,
+              onUsage: billUsage('builder', options),
               compactFallback,
               forceWriteTool: compactFallback,
               ...(timeoutMs ? { timeoutMs } : {}),
@@ -779,6 +943,7 @@ export default defineConfig({
                 emit,
                 chatId,
                 modelOptions: options,
+              onUsage: billUsage('builder', options),
                 repair: true,
                 compactFallback,
                 forceWriteTool: compactFallback,
@@ -799,13 +964,18 @@ export default defineConfig({
         } catch (primaryError) {
           if (primaryError?.code === 'BUILD_STOPPED') throw primaryError;
           const primaryProvider = builderModelOptions.provider ?? AGENT_PROVIDERS.builder;
-          if (primaryProvider !== 'gemini') throw primaryError;
+          // NVIDIA trial inference can remain queued without returning a
+          // tool call. Use the proven Groq/Qwen route for all recovery work.
+          const recoveryProvider = 'groq';
+          if (primaryProvider === recoveryProvider) throw primaryError;
 
-          logger._log('warn', 'Gemini builder failed; falling back to Groq/Qwen', {
+          logger._log('warn', 'Primary builder failed; using recovery builder', {
+            primaryProvider,
+            recoveryProvider,
             error: primaryError?.message ?? String(primaryError),
           });
-          await emit(chatId, 'building', 'Gemini is unavailable; continuing with the Qwen fallback…');
-          buildResult = await runBuildPass({ provider: 'groq' }, 'BuilderFallbackQwen', true);
+          await emit(chatId, 'building', `The selected builder could not write project files; continuing with the ${recoveryProvider === 'nvidia' ? 'DeepSeek' : 'Qwen'} fallback…`);
+          buildResult = await runBuildPass({ provider: recoveryProvider }, 'BuilderFallback', true);
         }
         builderSummary = String(buildResult.output ?? '').trim();
         logger.endStage('BuilderAgent');
@@ -817,6 +987,43 @@ export default defineConfig({
 
       await job.updateProgress({ percent: 55 + replanCount * 5, stage: 'built' });
       await emit(chatId, 'building', 'Code generation complete.');
+
+      // Rich screens receive one deliberate UI pass. This is not a generic
+      // retry: it spends a bounded model call on hierarchy, responsiveness,
+      // and interaction polish only when the plan represents a real UI.
+      // Bedrock Qwen performs the requested visual implementation in its
+      // atomic write. A second polish call costs another full model turn and
+      // previously kept the user waiting after a completed build.
+      if (!isReplan && builderModelOptions.provider !== 'bedrock' && needsUiPolish(fullPrompt, planObj)) {
+        await throwIfBuildStopped(job);
+        await emit(chatId, 'refining', 'Refining visual hierarchy and responsive details…');
+        logger.startStage('UiPolishAgent');
+        try {
+          const polishResult = await runBuilderAgent({
+            plan: planObj,
+            userMessage: fullPrompt,
+            tools: builderTools,
+            emit,
+            chatId,
+            modelOptions: builderModelOptions,
+            polish: true,
+            onUsage: billUsage('builder', builderModelOptions),
+          });
+          if (polishResult.wroteFiles) {
+            builderSummary = String(polishResult.output ?? '').trim() || builderSummary;
+            await emit(chatId, 'refining', 'Visual refinement complete.');
+          } else {
+            await emit(chatId, 'refining', 'Visual refinement skipped; implementation is unchanged.');
+          }
+          logger.endStage('UiPolishAgent', { wroteFiles: polishResult.wroteFiles });
+        } catch (error) {
+          // The implementation is already usable. A polish timeout or quota
+          // issue should never discard it or create a full pipeline retry.
+          logger._log('warn', 'UiPolishAgent skipped', { error: error?.message ?? String(error) });
+          logger.endStage('UiPolishAgent', { skipped: true });
+          await emit(chatId, 'refining', 'Visual refinement unavailable; continuing with the generated UI.');
+        }
+      }
       } else {
         await emit(chatId, 'building', 'Builder already completed; continuing from checkpoint.');
       }
@@ -868,7 +1075,7 @@ export default defineConfig({
 
       try {
         await withRetry(
-          () => runValidatorAgent({ tools: validatorTools ,emit,chatId,modelOptions}),
+          () => runValidatorAgent({ tools: validatorTools ,emit,chatId,modelOptions, onUsage: billUsage('validator')}),
           1, 'CodeValidatorAgent'
         );
         await throwIfBuildStopped(job);
@@ -894,7 +1101,7 @@ export default defineConfig({
 
       try {
         checkOutput = await withRetry(
-          () => runCheckerAgent({ tools: checkerTools,emit,chatId,modelOptions }),
+          () => runCheckerAgent({ tools: checkerTools,emit,chatId,modelOptions, onUsage: billUsage('checker') }),
           1, 'AppCheckerAgent'
         );
         await throwIfBuildStopped(job);
@@ -1001,8 +1208,8 @@ export default defineConfig({
         allFiles.map(({ path, content }) =>
           prisma.projectFile.upsert({
             where: { projectId_path: { projectId, path } },
-            update: { content },
-            create: { projectId, path, content },
+            update: { content: databaseSafeContent(content) },
+            create: { projectId, path, content: databaseSafeContent(content) },
           }).catch((e) => logger._log('warn', `Upsert failed: ${path}`, { err: e.message }))
         )
       );
@@ -1019,13 +1226,28 @@ export default defineConfig({
       ? (checkOutput || 'Build completed with issues.')
       : (usableBuilderSummary ? builderSummary : 'Your requested changes have been implemented and verified.');
     const tokenSummary = logger.tokens.summary();
+    await flushPendingUsage();
+    try {
+      const minimumCharge = await enforceMinimumBuildCharge({
+        userId: chatOwner.userId,
+        jobId: job.id,
+        provider: modelOptions.provider ?? AGENT_PROVIDERS.builder,
+      });
+      if (minimumCharge.applied) {
+        logger._log('info', 'Build minimum charged', { chargedUsd: minimumCharge.chargedUsd, balanceUsd: minimumCharge.balanceUsd });
+      }
+    } catch (error) {
+      // A transient database disconnect must not turn a verified build into a
+      // failed job or hide its live preview/summary from the user.
+      logger._log('warn', 'Minimum build charge deferred', { error: error?.message ?? String(error) });
+    }
 
     await prisma.message.create({
       data: {
         chatId, role: 'assistant', content: summary,
         metadata: { jobId: job.id, previewUrl, replanCount, tokens: tokenSummary },
       },
-    });
+    }).catch((error) => logger._log('warn', 'Skipped final message because chat no longer exists.', { error: error.message }));
 
     logger.endStage('pipeline', { replanCount, previewUrl, tokens: tokenSummary });
     await logger.publishTelemetry();
@@ -1036,6 +1258,7 @@ export default defineConfig({
     return { previewUrl, summary, tokens: tokenSummary };
 
   } catch (err) {
+    await flushPendingUsage();
     if (err?.code === 'BUILD_STOPPED') {
       // Consume the cancellation marker. The handler returns successfully,
       // so this job is completed once and cannot be retried as a failure.
@@ -1060,6 +1283,14 @@ export default defineConfig({
       });
     } catch { }
 
+    // Do not replay model calls for quota, provider, billing, validation, or
+    // code failures. BullMQ may retry only a genuine transient sandbox/network
+    // failure once (queue attempts = 2).
+    if (!isRetryableBuildFailure(err)) {
+      // BullMQ's discard() is synchronous in some supported versions; do not
+      // call .catch() on its void return and mask the original build error.
+      try { await job.discard(); } catch { }
+    }
     throw err;
   }
 }
@@ -1098,11 +1329,17 @@ console.log(JSON.stringify({
   checkerProvider: AGENT_PROVIDERS.checker,
   plannerModel: AGENT_PROVIDERS.planner === 'gemini'
     ? GEMINI_MODEL
+    : AGENT_PROVIDERS.planner === 'bedrock'
+      ? BEDROCK_PLANNER_MODEL
     : AGENT_PROVIDERS.planner === 'groq'
       ? GROQ_PLANNER_MODEL
       : process.env.OPENROUTER_MODEL || CLAUDE_PLANNER_MODEL,
   builderModel: AGENT_PROVIDERS.builder === 'gemini'
     ? GEMINI_MODEL
+    : AGENT_PROVIDERS.builder === 'bedrock'
+      ? BEDROCK_BUILDER_MODEL
+    : AGENT_PROVIDERS.builder === 'nvidia'
+      ? NVIDIA_DEEPSEEK_MODEL
     : AGENT_PROVIDERS.builder === 'groq'
       ? GROQ_BUILDER_MODEL
       : process.env.OPENROUTER_MODEL || CLAUDE_BUILDER_MODEL,

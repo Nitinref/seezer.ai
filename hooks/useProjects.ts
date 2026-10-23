@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import toast from "react-hot-toast";
 import { chatApi, projectsApi } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
+import type { Project, ProjectFile } from "@/types";
 
 export function useProjects() {
   const qc = useQueryClient();
@@ -11,7 +12,7 @@ export function useProjects() {
   const activeProject = useAppStore((s) => s.activeProject);
   const setActiveChatId = useAppStore((s) => s.setActiveChatId);
 
-  const { data: projects = [], isLoading } = useQuery({
+  const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ["projects"],
     queryFn: projectsApi.list,
   });
@@ -53,7 +54,7 @@ export function useProjects() {
 }
 
 export function useProjectFiles(projectId: string | null) {
-  return useQuery({
+  return useQuery<ProjectFile[]>({
     queryKey: ["project-files", projectId],
     queryFn: () => projectsApi.files(projectId!),
     enabled: !!projectId,

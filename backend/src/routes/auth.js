@@ -5,6 +5,13 @@ import { signToken, authenticate } from '../middleware/auth.js';
 
 const router = Router();
 
+function serializeUser(user) {
+  return {
+    ...user,
+    creditBalanceUsd: Number(user.creditBalanceUsd ?? 0),
+  };
+}
+
 // POST /auth/signup
 router.post('/signup', async (req, res) => {
   try {
@@ -22,11 +29,11 @@ router.post('/signup', async (req, res) => {
     const hashed = await bcrypt.hash(password, 12);
     const user = await prisma.user.create({
       data: { email, password: hashed, name: name ?? null },
-      select: { id: true, email: true, name: true, createdAt: true },
+      select: { id: true, email: true, name: true, createdAt: true, creditBalanceUsd: true },
     });
 
     const token = signToken({ id: user.id, email: user.email });
-    return res.status(201).json({ user, token });
+    return res.status(201).json({ user: serializeUser(user), token });
   } catch (err) {
     console.error('[auth/signup]', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -54,7 +61,7 @@ router.post('/login', async (req, res) => {
 
     const token = signToken({ id: user.id, email: user.email });
     const { password: _pwd, ...safeUser } = user;
-    return res.json({ user: safeUser, token });
+    return res.json({ user: serializeUser(safeUser), token });
   } catch (err) {
     console.error('[auth/login]', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -66,13 +73,28 @@ router.get('/me', authenticate, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { id: true, email: true, name: true, createdAt: true },
+      select: { id: true, email: true, name: true, createdAt: true, creditBalanceUsd: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    return res.json({ user });
+    return res.json({ user: serializeUser(user) });
   } catch (err) {
     console.error('[auth/me]', err);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /auth/credits — current AI-credit balance for the signed-in user.
+router.get('/credits', authenticate, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { creditBalanceUsd: true },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    return res.json({ balanceUsd: Number(user.creditBalanceUsd) });
+  } catch (err) {
+    console.error('[auth/credits]', err);
+    return res.status(500).json({ error: 'Unable to load credit balance' });
   }
 });
 

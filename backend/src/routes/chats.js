@@ -20,6 +20,14 @@ router.post('/', authenticate, async (req, res) => {
     });
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
+    const account = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { creditBalanceUsd: true },
+    });
+    if (!account || Number(account.creditBalanceUsd) <= 0) {
+      return res.status(402).json({ error: 'Your $2 AI credit has been used. Add credits to continue.' });
+    }
+
     // Find most recent chat or create a new one
     let chat = await prisma.chat.findFirst({
       where: { projectId, userId: req.user.id },
@@ -46,6 +54,7 @@ router.post('/', authenticate, async (req, res) => {
     const { jobId } = await enqueueBuildJob({
       chatId: chat.id,
       projectId,
+      userId: req.user.id,
       userMessage: message,
       previousMessages,
       provider,

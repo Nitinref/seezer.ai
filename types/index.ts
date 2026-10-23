@@ -5,6 +5,7 @@ export interface User {
   email: string;
   name: string | null;
   createdAt: string;
+  creditBalanceUsd: number;
 }
 
 export interface AuthResponse {

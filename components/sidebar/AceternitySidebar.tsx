@@ -9,9 +9,11 @@ import {
   Folder,
   Home,
   LayoutGrid,
+  LibraryBig,
   Newspaper,
   Plus,
   Star,
+  WalletCards,
 } from "lucide-react";
 import {
   IconArrowLeft,
@@ -20,10 +22,32 @@ import {
 } from "@tabler/icons-react";
 import { Sidebar, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
+import { creditsApi } from "@/lib/api";
+
+function asCreditBalance(value: unknown, fallback = 2) {
+  const balance = Number(value);
+  return Number.isFinite(balance) ? balance : fallback;
+}
 
 export default function AceternitySidebar({ onNewProject }: { onNewProject?: () => void }) {
   const [open, setOpen] = React.useState(true);
   const { logout, user } = useAuth();
+  const [creditBalance, setCreditBalance] = React.useState<number>(() => asCreditBalance(user?.creditBalanceUsd));
+
+  React.useEffect(() => {
+    let active = true;
+    const refreshBalance = async () => {
+      try {
+        const balance = await creditsApi.balance();
+        if (active) setCreditBalance(asCreditBalance(balance));
+      } catch {
+        // The rest of the workspace remains usable if the balance request fails.
+      }
+    };
+    void refreshBalance();
+    const interval = window.setInterval(refreshBalance, 15_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, []);
 
   const links = [
     {
@@ -35,6 +59,11 @@ export default function AceternitySidebar({ onNewProject }: { onNewProject?: () 
       label: "Projects",
       href: "#",
       icon: <LayoutGrid className="h-5 w-5 shrink-0 text-white/75" />,
+    },
+    {
+      label: "Skills",
+      href: "/skills",
+      icon: <LibraryBig className="h-5 w-5 shrink-0 text-white/75" />,
     },
     {
       label: "Starred",
@@ -162,6 +191,14 @@ export default function AceternitySidebar({ onNewProject }: { onNewProject?: () 
                 </div>
               ),
             }}
+          />
+          <SidebarLink
+            link={{
+                label: `$${creditBalance.toFixed(4)} credits`,
+              href: "#",
+              icon: <WalletCards className={`h-5 w-5 shrink-0 ${creditBalance <= 0 ? "text-rose-300" : "text-emerald-300"}`} />,
+            }}
+            onClick={(event: React.MouseEvent<HTMLAnchorElement>) => event.preventDefault()}
           />
           <SidebarLink
             link={{

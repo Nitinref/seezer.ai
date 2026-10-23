@@ -2,7 +2,7 @@ import { buildQueue } from '../queues/buildQueue.js';
 import { bullConnection } from '../redis/index.js';
 import { randomUUID } from 'node:crypto';
 
-export async function enqueueBuildJob({ chatId, projectId, userMessage, previousMessages = [], provider, model }) {
+export async function enqueueBuildJob({ chatId, projectId, userId, userMessage, previousMessages = [], provider, model }) {
   // BullMQ's auto-incrementing IDs can be reused after a local Redis reset.
   // A stale `build:cancel:<id>` key would then instantly cancel an unrelated
   // new build, so make every build identifier globally unique.
@@ -10,7 +10,7 @@ export async function enqueueBuildJob({ chatId, projectId, userMessage, previous
   await bullConnection.del(`build:cancel:${jobId}`);
   const job = await buildQueue.add(
     'build',
-    { chatId, projectId, userMessage, previousMessages, provider, model },
+    { chatId, projectId, userId, userMessage, previousMessages, provider, model },
     { jobId },
   );
   return { jobId: job.id };

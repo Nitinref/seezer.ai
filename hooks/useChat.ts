@@ -6,7 +6,7 @@ import { chatApi } from "@/lib/api";
 import { ForgeWebSocket } from "@/lib/websocket";
 import { useAppStore } from "@/store/appStore";
 import { useAuthStore } from "@/store/authStore";
-import type { PipelineEvent } from "@/types";
+import type { Message, PipelineEvent } from "@/types";
 
 const STAGE_PROGRESS: Record<string, number> = {
   start: 5, sandbox: 20, planning: 35,
@@ -37,14 +37,14 @@ export function useChat(chatId: string | null) {
   }, [resolvedChatId, chatId, setActiveChatId]);
 
   // Load existing messages
-  const messagesQuery = useQuery({
+  const messagesQuery = useQuery<Message[]>({
     queryKey: ["messages", resolvedChatId],
     queryFn: () => chatApi.messages(resolvedChatId!),
     enabled: !!resolvedChatId,
   });
 
   // Restore thoughts, tool calls, and file changes for reopened projects.
-  const pipelineEventsQuery = useQuery({
+  const pipelineEventsQuery = useQuery<PipelineEvent[]>({
     queryKey: ["pipeline-events", resolvedChatId],
     queryFn: () => chatApi.pipelineEvents(resolvedChatId!),
     enabled: !!resolvedChatId,

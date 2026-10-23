@@ -10,12 +10,18 @@ import {
   PanelLeftOpen,
   Plus,
   Rocket,
+  WalletCards,
 } from "lucide-react";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { CenterPanel } from "@/components/preview/CenterPanel";
 import { ProjectsSidebar } from "@/components/sidebar/ProjectsSidebar";
 import { useAppStore } from "@/store/appStore";
-import { projectsApi } from "@/lib/api";
+import { creditsApi, projectsApi } from "@/lib/api";
+
+function asCreditBalance(value: unknown, fallback = 2) {
+  const balance = Number(value);
+  return Number.isFinite(balance) ? balance : fallback;
+}
 
 export function AppShell({
   initialPrompt,
@@ -29,6 +35,7 @@ export function AppShell({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [previewWidth, setPreviewWidth] = useState(70);
   const [mobilePanel, setMobilePanel] = useState<"chat" | "preview">("chat");
+  const [creditBalance, setCreditBalance] = useState(2);
   const dragging = useRef(false);
   const { activeProject, activeTab, setActiveTab, setPreviewUrl } = useAppStore();
   const restoredPreviewProjects = useRef(new Set<string>());
@@ -66,6 +73,21 @@ export function AppShell({
   useEffect(() => {
     window.localStorage.setItem("sizzer.previewWidth.v3", String(previewWidth));
   }, [previewWidth]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshBalance = async () => {
+      try {
+        const balance = await creditsApi.balance();
+        if (active) setCreditBalance(asCreditBalance(balance));
+      } catch {
+        // Keep the initial grant visible if the API has not restarted yet.
+      }
+    };
+    void refreshBalance();
+    const interval = window.setInterval(refreshBalance, 15_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, []);
 
   useEffect(() => {
     if (!activeProject?.id || !activeProject.previewUrl || restoredPreviewProjects.current.has(activeProject.id)) return;
@@ -133,6 +155,9 @@ export function AppShell({
             >
               <Globe2 size={17} className="text-white/70" /> Preview
             </button>
+            <span title="Remaining AI credit" className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] font-semibold tabular-nums ${creditBalance <= 0 ? "border-rose-400/30 bg-rose-400/10 text-rose-200" : "border-emerald-400/20 bg-emerald-400/[.08] text-emerald-200"}`}>
+              <WalletCards size={15} /> ${creditBalance.toFixed(4)}
+            </span>
             <button
               onClick={() => setActiveTab("code")}
               className={`flex items-center gap-2 rounded-xl px-4 py-2 text-[15px] font-medium transition ${

@@ -9,7 +9,7 @@ import { CHECKER_TIMEOUT_MS } from '../utils/llm.js';
  * @param {Array}  tools     — checker tools: test_build, execute_command, read_file, create_file, save_context
  * @param {number} timeoutMs
  */
-export async function runCheckerAgent({ tools, timeoutMs = CHECKER_TIMEOUT_MS,emit,chatId,modelOptions = {}}) {
+export async function runCheckerAgent({ tools, timeoutMs = CHECKER_TIMEOUT_MS,emit,chatId,modelOptions = {}, onUsage }) {
     return Promise.race([
         runReActAgent({
             systemPrompt: CHECKER_SYSTEM,
@@ -22,7 +22,8 @@ export async function runCheckerAgent({ tools, timeoutMs = CHECKER_TIMEOUT_MS,em
             chatId,
             modelType: 'checker',
             agentName:'checker', // haiku
-            modelOptions
+            modelOptions,
+            onUsage
         }),
         new Promise((_, reject) =>
             setTimeout(() => reject(new Error(`CheckerAgent timeout after ${timeoutMs / 1000}s`)), timeoutMs)

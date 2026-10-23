@@ -53,7 +53,7 @@ export function ChatPanel({ initialPrompt }: { initialPrompt?: string }) {
 
   const qc = useQueryClient(); // ✅ added
 
-  const { activeProject, activeChatId, isBuilding, pipelineEvents, buildProgress } = useAppStore();
+  const { activeProject, activeChatId, isBuilding, pipelineEvents, buildProgress, setSelectedFile, setActiveTab } = useAppStore();
   const { data: projectFiles = [] } = useProjectFiles(activeProject?.id ?? null);
   const { messagesQuery, sendMutation, stopBuild, chatId: resolvedChatId } = useChat(activeChatId);
   const messages = useMemo(() => messagesQuery.data ?? [], [messagesQuery.data]);
@@ -102,6 +102,13 @@ export function ChatPanel({ initialPrompt }: { initialPrompt?: string }) {
     return files.filter((file) => file.path.toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 8);
   }, [projectFiles, mentionQuery]);
   const mentionOpen = mentionStart !== null && mentionFiles.length > 0;
+
+  function openChangedFile(path: string) {
+    const file = projectFiles.find((candidate) => candidate.path.replace(/^\/+/, "") === path.replace(/^\/+/, ""));
+    if (!file) return;
+    setSelectedFile(file);
+    setActiveTab("code");
+  }
 
   function insertMention(path: string) {
     if (mentionStart === null) return;
@@ -210,7 +217,7 @@ export function ChatPanel({ initialPrompt }: { initialPrompt?: string }) {
                   events={run}
                 />
               ))}
-            {completedRuns.map((run) => <RunFileSummary key={`summary-${run[0]?.ts ?? msg.id}`} events={run} />)}
+            {completedRuns.map((run) => <RunFileSummary key={`summary-${run[0]?.ts ?? msg.id}`} events={run} onOpenFile={openChangedFile} />)}
           </React.Fragment>
           );
         })}

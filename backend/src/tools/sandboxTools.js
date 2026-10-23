@@ -383,7 +383,20 @@ export function makeSandboxTools(projectId) {
       parameters: z.object({}),
       execute: async () => {
         const sb = await getSb();
-        const build = await sb.commands.run('npm run build', { cwd: '/app', timeoutMs: 120_000 });
+        let build;
+        try {
+          build = await sb.commands.run('npm run build', { cwd: '/app', timeoutMs: 120_000 });
+        } catch (error) {
+          // E2B can throw (rather than return a non-zero result) when its
+          // command runner cannot start. Return a normal failed verification
+          // so a preview request gives a useful response instead of crashing
+          // the entire BullMQ job.
+          return JSON.stringify({
+            success: false,
+            build: { exitCode: null, stdout: '', stderr: '', error: error?.message ?? String(error) },
+            lint: { skipped: true, exitCode: null, stdout: '', stderr: '' },
+          });
+        }
         let lint = { skipped: true, exitCode: 0, stdout: '', stderr: '' };
         if (build.exitCode === 0) {
           const result = await sb.commands.run('npm run lint --if-present', { cwd: '/app', timeoutMs: 120_000 });
@@ -427,11 +440,16 @@ export function makeSandboxTools(projectId) {
   parameters: z.object({
     key: z.string().default('builder'),
   }),
-  execute: async ({ key }) => {
+  execute: async ({ key = 'builder' }) => {
     const sb = await getSb();
     try {
       return await sb.files.read(`/app/.build-context-${key}.json`);
     } catch {
+      // A previous direct worker call omitted key before defaults were applied
+      // by the LangChain schema. Keep that context recoverable once.
+      if (key === 'builder') {
+        try { return await sb.files.read('/app/.build-context-undefined.json'); } catch { }
+      }
       try { return await sb.files.read('/app/.build-context.json'); } catch {
         return JSON.stringify({});
       }
@@ -446,7 +464,7 @@ export function makeSandboxTools(projectId) {
     context: z.string().describe('JSON string of the context object to save'),
     key: z.string().default('builder'),
   }),
-  execute: async ({ context, key }) => {
+  execute: async ({ context, key = 'builder' }) => {
     const sb   = await getSb();
     const file = `/app/.build-context-${key}.json`;
     const data = typeof context === 'string' ? context : JSON.stringify(context, null, 2);

@@ -21,20 +21,33 @@ export async function runPlannerAgent({
   timeoutMs = PLANNER_TIMEOUT_MS,
   emit,
   chatId,
-  modelOptions = {}
+  modelOptions = {},
+  onUsage = async () => {}
 }){
   // A plan with files, steps, and descriptions is often cut off at 1024
   // tokens, which then falls back to a generic template. Leave room for the
   // planner's real JSON response.
   const model = makeModel('planner', 0, 2048, modelOptions);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let timeout;
+  const deadline = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`PlannerAgent timeout after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+  });
   let result;
   try {
-    result = await model.invoke([
+    const invocation = model.invoke([
       new SystemMessage(PLANNER_SYSTEM),
       new HumanMessage(prompt),
     ], { signal: controller.signal });
+    // Some provider adapters ignore AbortSignal while waiting for a response.
+    // Race the request so a stalled planner cannot delay the builder forever.
+    result = await Promise.race([
+      invocation,
+      deadline,
+    ]);
   } catch (error) {
     if (controller.signal.aborted) {
       throw new Error(`PlannerAgent timeout after ${Math.round(timeoutMs / 1000)}s`);
@@ -45,6 +58,11 @@ export async function runPlannerAgent({
   }
 
   const content = result.content;
+  const usage = result.usage_metadata
+    ?? result.response_metadata?.usage_metadata
+    ?? result.response_metadata?.usage
+    ?? result.response_metadata?.usageMetadata;
+  if (usage) await onUsage(usage);
   let text;
   if (typeof content === 'string') text = content;
   else if (Array.isArray(content)) text = content.map((p) => (
