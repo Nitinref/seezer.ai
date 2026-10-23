@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;1,500&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;1,400&family=Sora:wght@600;700&family=Syne:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;1,500&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:ital,wght@0,400;1,400&family=Sora:wght@600;700&family=Syne:wght@500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -73,6 +73,23 @@
 .dashboard-aurora > section {
   position: relative;
   z-index: 10;
+}
+
+/*
+ * WebGL shaders are not rendered consistently by all mobile browsers (some
+ * devices return an almost-black frame). Use a CSS-only version of the aurora
+ * on narrow screens so the dashboard keeps its intended blue hero treatment.
+ */
+@media (max-width: 767px) {
+  .dashboard-aurora {
+    background:
+      radial-gradient(ellipse 105% 45% at 43% 4%, rgb(35 125 236 / .92) 0%, rgb(14 83 184 / .86) 43%, rgb(4 27 55 / .86) 73%, transparent 100%),
+      linear-gradient(180deg, #0755b8 0%, #082c5e 40%, #030d13 72%, #020406 100%) !important;
+  }
+
+  .dashboard-aurora > canvas {
+    display: none !important;
+  }
 }
 
 /* Blend the pale section above into the scenic footer without a hard seam. */
