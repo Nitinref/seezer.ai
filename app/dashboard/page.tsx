@@ -78,7 +78,7 @@ function DashboardHome({ onStart, onOpenProject }: { onStart: (prompt: string) =
         </header>
         {!showExisting ? (
           <section className="mx-auto flex min-h-[610px] max-w-[1050px] flex-col items-center px-5 pb-12 pt-12 text-center sm:pt-24">
-            <h1 className="max-w-[320px] text-[40px] font-bold leading-[.98] tracking-[-0.07em] sm:max-w-none sm:text-[clamp(42px,6vw,76px)] sm:font-semibold sm:leading-[.95]">
+            <h1 className="max-w-[320px] font-[family-name:var(--font-ui)] text-[40px] font-bold leading-[.98] tracking-[-0.07em] sm:max-w-none sm:text-[clamp(42px,6vw,76px)] sm:leading-[.95]">
               What will you build today?
             </h1>
             <p className="mt-5 max-w-[310px] text-[17px] text-white/70 sm:max-w-none sm:text-[clamp(17px,2vw,24px)]">

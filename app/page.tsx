@@ -9,6 +9,7 @@ import { CardStack, type CardStackItem } from "@/components/ui/card-stack";
 import { BlurredStagger } from "@/components/ui/blurred-stagger-text";
 import { MorphingText } from "@/components/ui/morphing-text";
 import { SizzerLogo } from "@/components/brand/SizzerLogo";
+import { LiquidGlassButton } from "@/components/ui/liquid-glass-button";
 
 const HERO = "/hero-balloon-meadow.png";
 const NIGHT_HERO = "/hero-balloon-meadow-night.webp";
@@ -36,9 +37,9 @@ function StartButton({ navbar = false }: { navbar?: boolean }) {
   const router = useRouter();
   const { token } = useAuthStore();
   const classes = navbar
-    ? "border-white/45 bg-[#0e6398]/[0.52] px-4 py-1.5 text-[15px] shadow-[inset_0_1px_0_rgba(255,255,255,.3)] hover:bg-[#0e6398]/[0.64] max-md:gap-2 max-md:px-3 max-md:py-1 max-md:text-[10px]"
+    ? "min-h-[58px] border-white/45 bg-[#0e6398]/[0.52] px-6 py-3 text-[17px] shadow-[inset_0_1px_0_rgba(255,255,255,.3)] hover:bg-[#0e6398]/[0.64] max-md:min-h-[44px] max-md:gap-2 max-md:px-3 max-md:py-1.5 max-md:text-[12px]"
     : "border-white/35 bg-white/[0.08] px-7 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,.22)] hover:bg-white/[0.16]";
-  return <button onClick={() => router.push(token ? "/dashboard" : "/signup")} className={`group inline-flex items-center gap-3 rounded-full border font-sans text-[16px] font-medium text-white backdrop-blur-2xl backdrop-saturate-150 transition ${classes}`}><span>Start building</span><span className={`grid place-items-center rounded-full bg-white/15 transition group-hover:translate-x-0.5 ${navbar ? "h-7 w-7 max-md:h-5 max-md:w-5" : "h-8 w-8"}`}><ArrowUpRight size={17} /></span></button>;
+  return <button onClick={() => router.push(token ? "/dashboard" : "/signup")} className={`group inline-flex items-center gap-3 rounded-full border font-[family-name:var(--font-ui)] text-[16px] font-bold tracking-[-0.03em] text-white backdrop-blur-2xl backdrop-saturate-150 transition ${classes}`}><span>Start building</span><span className={`grid place-items-center rounded-full bg-white/15 transition group-hover:translate-x-0.5 ${navbar ? "h-10 w-10 max-md:h-6 max-md:w-6" : "h-8 w-8"}`}><ArrowUpRight size={17} /></span></button>;
 }
 
 export default function LandingPage() {
@@ -47,8 +48,11 @@ export default function LandingPage() {
   const [night, setNight] = useState(false);
 
   useEffect(() => {
-    const initialNight = window.localStorage.getItem("sizzer-theme") === "night";
-    setNight(initialNight);
+    // The landing page always opens in light mode. Night mode remains available
+    // from the toggle, but a previously saved choice must not override the default.
+    window.localStorage.setItem("sizzer-theme", "light");
+    document.documentElement.classList.remove("dark");
+    document.body.classList.remove("landing-night-active");
   }, []);
 
   useEffect(() => {
@@ -72,12 +76,20 @@ export default function LandingPage() {
   return <main className={`landing-page min-h-screen overflow-hidden bg-[#fafbf8] text-[#17202b] ${night ? "landing-night" : ""}`}>
     <section className="relative min-h-screen overflow-hidden bg-[#28729a]">
       <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: night ? `linear-gradient(180deg, rgba(2,10,35,.08), rgba(2,10,35,.03) 48%, rgba(2,8,20,.10)), url(${sceneImage})` : `linear-gradient(180deg, rgba(6,62,112,.30), rgba(14,93,145,.10) 48%, rgba(12,55,37,.08)), url(${sceneImage})` }} />
-      <header className="relative z-10 mx-auto mt-7 flex w-fit max-w-[650px] items-center justify-between gap-2 rounded-full border border-white/50 bg-[#126b9f]/[0.38] px-2.5 py-1.5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.4),0_16px_40px_rgba(0,30,55,.24)] backdrop-blur-[32px] backdrop-saturate-150 md:w-full md:gap-0 md:px-4 md:py-2">
-        <SizzerLogo className="text-white" iconClassName="h-4 w-4 md:h-7 md:w-7" wordmarkClassName="text-[11px] md:text-[17px]" /><nav className="hidden items-center gap-5 font-sans text-[13px] md:flex"><a href="#how">How it works</a><a href="#questions">Questions</a><Link href="/login">Sign in</Link></nav><div className="flex items-center gap-1.5"><button type="button" onClick={toggleTheme} aria-label={night ? "Switch to daylight mode" : "Switch to night mode"} title={night ? "Day mode" : "Night mode"} className="grid h-8 w-8 place-items-center rounded-full border border-white/25 bg-white/10 text-white transition hover:bg-white/20">{night ? <Sun size={15} /> : <Moon size={15} />}</button><StartButton navbar /></div>
-      </header>
+      <div className="relative z-10 mx-auto mt-5 flex w-[calc(100%-1.25rem)] max-w-[870px] items-center gap-2.5 md:mt-7 md:w-[calc(100%-2rem)]">
+        <header className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-full border border-white/50 bg-[#126b9f]/[0.38] px-3.5 py-2.5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.4),0_16px_40px_rgba(0,30,55,.24)] backdrop-blur-[32px] backdrop-saturate-150 md:gap-0 md:px-5">
+          <SizzerLogo className="text-white" iconClassName="h-5 w-5 md:h-8 md:w-8" wordmarkClassName="text-[13px] md:text-[19px]" />
+          <nav className="hidden items-center gap-8 font-[family-name:var(--font-ui)] text-[17px] font-bold tracking-[-0.04em] md:flex"><a className="transition hover:text-white/75" href="#how">How it works</a><a className="transition hover:text-white/75" href="#questions">Questions</a><Link className="transition hover:text-white/75" href="/login">Sign in</Link></nav>
+          <StartButton navbar />
+        </header>
+        <LiquidGlassButton type="button" onClick={toggleTheme} aria-label={night ? "Switch to light mode" : "Switch to dark mode"} title={night ? "Light mode" : "Dark mode"} className="h-14 shrink-0 gap-2.5 px-6 font-[family-name:var(--font-ui)] text-base font-bold tracking-[-0.025em]">
+          {night ? <Sun size={20} /> : <Moon size={20} />}
+          {night ? "Light" : "Dark"}
+        </LiquidGlassButton>
+      </div>
       <div className="relative z-10 mx-auto flex w-full max-w-[56rem] flex-col items-center px-5 pb-24 pt-[6vh] text-center text-white md:pt-[6vh]">
-        <h1 id="hero-heading" className="text-balance font-[family-name:var(--font-display)] text-[clamp(40px,6.6vw,86px)] leading-[1.06] tracking-[-0.015em]"><span style={{ ["--i" as string]: 1 }} className="hero-line-rise block">Every app begins</span><em style={{ ["--i" as string]: 2 }} className="hero-line-rise block pb-1 font-medium italic leading-[1.14]"><MorphingText texts={["as a sentence.", "as an idea.", "as a prompt."]} className="font-[family-name:var(--font-display)]" /></em></h1>
-        <p style={{ ["--i" as string]: 3 }} className="hero-line-rise mt-5 max-w-[42ch] text-pretty text-[16.5px] leading-[1.62] text-white/92 [text-shadow:0_1px_18px_rgb(10_30_50_/_0.45)]">Describe it in plain words. Sizzer plans it with you, then builds the full app, database included.</p>
+        <h1 id="hero-heading" className="text-balance font-[family-name:var(--font-brand)] text-[clamp(50px,8vw,96px)] font-bold leading-[1.02] tracking-[-0.055em]"><span style={{ ["--i" as string]: 1 }} className="hero-line-rise block">Every app begins</span><em style={{ ["--i" as string]: 2 }} className="hero-line-rise block pb-1 font-semibold italic leading-[1.1]"><MorphingText texts={["as a sentence.", "as an idea.", "as a prompt."]} className="font-[family-name:var(--font-brand)]" /></em></h1>
+        <p style={{ ["--i" as string]: 3 }} className="hero-line-rise mt-6 max-w-[40ch] text-pretty font-sans text-[17px] leading-[1.62] text-white/92 [text-shadow:0_1px_18px_rgb(10_30_50_/_0.45)] md:text-[18px]">Describe it in plain words. Sizzer plans it with you, then builds the full app, database included.</p>
         <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row"><StartButton /><button onClick={() => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" })} className="rounded-full bg-white px-9 py-4 text-[16px] font-medium text-[#17202b] transition hover:bg-white/90">See how it works</button></div>
       </div><div className="pointer-events-none absolute bottom-0 left-0 right-0 h-28 bg-[linear-gradient(to_bottom,transparent_0%,rgba(250,251,248,.48)_58%,#fafbf8_100%)] backdrop-blur-[2px]" />
     </section>
