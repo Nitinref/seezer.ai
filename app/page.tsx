@@ -9,6 +9,7 @@ import { CardStack, type CardStackItem } from "@/components/ui/card-stack";
 import { BlurredStagger } from "@/components/ui/blurred-stagger-text";
 import { MorphingText } from "@/components/ui/morphing-text";
 import { SizzerLogo } from "@/components/brand/SizzerLogo";
+import { GitHubStarButton } from "@/components/brand/GitHubStarButton";
 import { LiquidGlassButton } from "@/components/ui/liquid-glass-button";
 
 const HERO = "/hero-balloon-meadow.png";
@@ -91,6 +92,7 @@ export default function LandingPage() {
         <h1 id="hero-heading" className="text-balance font-[family-name:var(--font-brand)] text-[clamp(50px,8vw,96px)] font-bold leading-[1.02] tracking-[-0.055em]"><span style={{ ["--i" as string]: 1 }} className="hero-line-rise block">Every app begins</span><em style={{ ["--i" as string]: 2 }} className="hero-line-rise block pb-1 font-semibold italic leading-[1.1]"><MorphingText texts={["as a sentence.", "as an idea.", "as a prompt."]} className="font-[family-name:var(--font-brand)]" /></em></h1>
         <p style={{ ["--i" as string]: 3 }} className="hero-line-rise mt-6 max-w-[40ch] text-pretty font-sans text-[17px] leading-[1.62] text-white/92 [text-shadow:0_1px_18px_rgb(10_30_50_/_0.45)] md:text-[18px]">Describe it in plain words. Sizzer plans it with you, then builds the full app, database included.</p>
         <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row"><StartButton /><button onClick={() => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" })} className="rounded-full bg-white px-9 py-4 text-[16px] font-medium text-[#17202b] transition hover:bg-white/90">See how it works</button></div>
+        <div className="mt-5"><GitHubStarButton /></div>
       </div><div className="pointer-events-none absolute bottom-0 left-0 right-0 h-28 bg-[linear-gradient(to_bottom,transparent_0%,rgba(250,251,248,.48)_58%,#fafbf8_100%)] backdrop-blur-[2px]" />
     </section>
 
