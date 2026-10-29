@@ -13,7 +13,11 @@ COPY prisma.config.ts ./prisma.config.ts
 
 ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile \
+    --network-concurrency=1 \
+    --fetch-retries=5 \
+    --fetch-retry-mintimeout=10000 \
+    --fetch-retry-maxtimeout=120000
 
 COPY src ./src
 
