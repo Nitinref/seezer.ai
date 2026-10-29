@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import prisma from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
-import { restoreProjectPreview } from '../tools/sandboxTools.js';
+import { getOrCreateSandbox, restoreProjectPreview } from '../tools/sandboxTools.js';
 
 const router = Router();
 
@@ -155,6 +155,55 @@ router.get('/:id/files/*file', async (req, res) => {
   } catch (err) {
     console.error('[projects/file]', err);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /projects/:id/files — save a manual editor change to both the
+// durable project record and the live E2B workspace. A running Vite server
+// receives the change through HMR without another AI build.
+router.put('/:id/files', async (req, res) => {
+  try {
+    const project = await prisma.project.findFirst({
+      where: { id: req.params.id, userId: req.user.id },
+      select: { id: true },
+    });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const { path: filePath, content } = req.body ?? {};
+    console.log(`[projects/file/update] project=${req.params.id} path=${filePath} bytes=${typeof content === 'string' ? content.length : 'invalid'}`);
+    if (typeof filePath !== 'string' || !filePath || typeof content !== 'string') {
+      return res.status(400).json({ error: 'A file path and string content are required' });
+    }
+    if (content.length > 1_000_000) {
+      return res.status(413).json({ error: 'File content exceeds the 1 MB editor limit' });
+    }
+
+    // Manual editing only updates files already belonging to this project;
+    // this prevents a crafted path from writing elsewhere in the sandbox.
+    const existing = await prisma.projectFile.findUnique({
+      where: { projectId_path: { projectId: project.id, path: filePath } },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'File not found' });
+
+    const file = await prisma.projectFile.update({
+      where: { projectId_path: { projectId: project.id, path: filePath } },
+      data: { content },
+    });
+    // Persist the edit first. A temporary E2B reconnect failure must not
+    // discard a manual user edit; the next preview restore will rehydrate it.
+    let liveUpdated = true;
+    try {
+      const sandbox = await getOrCreateSandbox(project.id);
+      await sandbox.files.write(`/app/${filePath}`, content);
+    } catch (error) {
+      liveUpdated = false;
+      console.warn(`[projects/file/update] Saved ${filePath} but could not update live sandbox: ${error?.message ?? String(error)}`);
+    }
+    return res.json({ file, liveUpdated });
+  } catch (err) {
+    console.error('[projects/file/update]', err);
+    return res.status(502).json({ error: err.message || 'Could not save file' });
   }
 });
 

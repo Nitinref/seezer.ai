@@ -1,16 +1,21 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import toast from "react-hot-toast";
 import {
   ChevronDown,
   ChevronRight,
   Download,
   Folder,
   FolderOpen,
+  LoaderCircle,
+  Save,
 } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import { useAppStore } from "@/store/appStore";
 import { useFileContent, useProjectFiles } from "@/hooks/useProjects";
+import { projectsApi } from "@/lib/api";
 import { getFileIcon } from "@/components/ui/getFileIcon";
 import type { ProjectFile } from "@/types";
 
@@ -152,9 +157,12 @@ function TreeItem({
 
 export function CodeViewer() {
   const { activeProject, selectedFile, setSelectedFile } = useAppStore();
+  const queryClient = useQueryClient();
   const [folderOverrides, setFolderOverrides] = useState<Set<string>>(
     () => new Set(),
   );
+  const [draft, setDraft] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const {
     data: files = [],
     isLoading: filesLoading,
@@ -195,6 +203,30 @@ export function CodeViewer() {
 
   const fileName = selectedFile?.path.split("/").pop() ?? "";
   const fileContent = fileData?.content ?? "";
+  const isDirty = Boolean(selectedFile && draft !== fileContent);
+
+  useEffect(() => {
+    setDraft(fileData?.content ?? "");
+  }, [fileData?.content, selectedFile?.path]);
+
+  async function saveFile() {
+    if (!activeProject?.id || !selectedFile || !isDirty || isSaving) return;
+    setIsSaving(true);
+    try {
+      const { file: saved, liveUpdated } = await projectsApi.updateFile(activeProject.id, selectedFile.path, draft);
+      queryClient.setQueryData(["file-content", activeProject.id, selectedFile.path], saved);
+      queryClient.invalidateQueries({ queryKey: ["project-files", activeProject.id] });
+      toast.success(liveUpdated ? "Saved to live preview" : "Saved. Restart preview to see the change.");
+    } catch (error) {
+      const candidate = error as { response?: { data?: { error?: unknown } }; message?: unknown } | null;
+      const message = candidate?.response?.data?.error
+        ?? candidate?.message
+        ?? String(error);
+      toast.error(`Could not save: ${message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   return (
     <div className="flex h-full min-w-0 overflow-hidden bg-[#0f1012] text-white">
@@ -250,17 +282,26 @@ export function CodeViewer() {
               </>
             )}
           </div>
-          {selectedFile && (
+          {selectedFile && <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={saveFile}
+              disabled={!isDirty || isSaving || isLoading || !!fileError}
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-sky-300/25 bg-sky-400/10 px-2.5 text-[12px] text-sky-100 transition-colors hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isSaving ? <LoaderCircle size={13} className="animate-spin" /> : <Save size={13} />}
+              {isSaving ? "Saving" : "Save"}
+            </button>
             <button
               type="button"
               onClick={downloadFile}
               disabled={isLoading || !!fileError}
-              className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-white/[0.08] px-2.5 text-[12px] text-white/45 transition-colors hover:bg-white/[0.04] hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-white/[0.08] px-2.5 text-[12px] text-white/45 transition-colors hover:bg-white/[0.04] hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Download size={13} />
               Download
             </button>
-          )}
+          </div>}
         </header>
 
         {!selectedFile && (
@@ -291,7 +332,8 @@ export function CodeViewer() {
             <Editor
               height="100%"
               language={getLanguage(fileName)}
-              value={fileContent}
+              value={draft}
+              onChange={(value) => setDraft(value ?? "")}
               theme="sizzer-code-review"
               beforeMount={(monaco) => {
                 monaco.editor.defineTheme("sizzer-code-review", {
@@ -332,7 +374,7 @@ export function CodeViewer() {
                 });
               }}
               options={{
-                readOnly: true,
+                readOnly: false,
                 fontSize: 15,
                 lineHeight: 23,
                 fontFamily: "'JetBrains Mono', 'Fira Code', monospace",

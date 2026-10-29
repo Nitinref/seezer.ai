@@ -11,6 +11,7 @@ export function CenterPanel() {
   const { activeProject, activeTab, setActiveTab, previewUrl, setPreviewUrl, isBuilding, buildProgress, pipelineEvents } = useAppStore();
   const [isRestoringPreview, setIsRestoringPreview] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [mobilePreview, setMobilePreview] = useState(false);
   const lastEvent = pipelineEvents.findLast((event) => event.type === "pipeline_update" && event.stage);
   const stage = lastEvent?.stage ?? "";
 
@@ -38,7 +39,16 @@ export function CenterPanel() {
         <div className="flex h-9 w-[min(640px,90%)] items-center gap-4 rounded-lg border border-white/15 bg-[#080808] px-3 text-white/45 shadow-xl">
           <button aria-label="Back"><ArrowLeft size={15} /></button>
           <button aria-label="Forward"><ArrowRight size={15} /></button>
-          <Smartphone size={15} />
+          <button
+            type="button"
+            onClick={() => setMobilePreview((enabled) => !enabled)}
+            aria-label={mobilePreview ? "Use desktop preview" : "Use mobile preview"}
+            aria-pressed={mobilePreview}
+            title={mobilePreview ? "Desktop preview" : "Mobile preview"}
+            className={mobilePreview ? "text-sky-300" : "text-white/45 hover:text-white/80"}
+          >
+            <Smartphone size={15} />
+          </button>
           <span className="flex-1 truncate text-center text-sm text-white/75">{previewUrl?.replace(/^https?:\/\//, "") ?? "/"}</span>
           <button onClick={() => previewUrl && window.open(previewUrl, "_blank")} aria-label="Open preview"><ExternalLink size={15} /></button>
           <button onClick={restorePreview} disabled={!activeProject?.id || isRestoringPreview} aria-label="Restart preview" title="Restart preview" className="disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={15} className={isRestoringPreview ? "animate-spin" : ""} /></button>
@@ -49,7 +59,15 @@ export function CenterPanel() {
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {activeTab === "code" && <div className="absolute inset-0 overflow-auto"><CodeViewer /></div>}
 
-        {previewUrl && <iframe src={previewUrl} className="absolute inset-0 h-full w-full border-0" title="Preview" style={{ display: activeTab === "preview" ? "block" : "none" }} />}
+        {previewUrl && <div
+          className={mobilePreview
+            ? "absolute bottom-3 left-1/2 top-3 w-[min(390px,calc(100%-24px))] -translate-x-1/2 overflow-hidden rounded-[28px] border-[6px] border-zinc-800 bg-black shadow-2xl shadow-black/60"
+            : "absolute inset-0"}
+          style={{ display: activeTab === "preview" ? "block" : "none" }}
+        >
+          {mobilePreview && <div className="absolute left-1/2 top-1 z-10 h-1.5 w-16 -translate-x-1/2 rounded-full bg-zinc-700" />}
+          <iframe src={previewUrl} className="h-full w-full border-0" title={mobilePreview ? "Mobile preview" : "Desktop preview"} />
+        </div>}
 
         {activeTab === "preview" && !previewUrl && !isBuilding && <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center text-white/60">
           <Gift size={108} strokeWidth={1.2} className="text-blue-500" />
@@ -60,7 +78,7 @@ export function CenterPanel() {
           <div className="absolute bottom-7 flex gap-8 text-blue-400"><span>◉ Help Center</span><span>♣ Join our Community</span></div>
         </div>}
 
-        {(isBuilding || isRestoringPreview) && activeTab === "preview" && <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#050505]/90 px-6 backdrop-blur-sm">
+        {(isRestoringPreview || (isBuilding && !previewUrl)) && activeTab === "preview" && <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#050505]/90 px-6 backdrop-blur-sm">
           <LiquidWaveSpinner size="lg" className="max-w-sm bg-transparent" />
           <p className="mt-2 text-sm text-white/65">{stage || "Building"} · {buildProgress}%</p>
         </div>}

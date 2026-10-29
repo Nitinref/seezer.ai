@@ -460,7 +460,11 @@ RULES:
 - The plan must list every file the builder should create or update; do not collapse a multi-file app into Home.jsx.
 - newPages should include every route page required by the request, even when the user did not use the exact words "multiple pages".
 - packages only if not in default stack
-- ui is a concise visual brief: design direction, small palette, type treatment, section hierarchy, interactions, and mobile behavior. It must guide a premium UI, not generic Tailwind.
+- ui is a concrete visual-production brief, not a list of generic adjectives. visualDirection must name the composition and mood (for example, "editorial split-screen product launch"), palette must name 3-5 semantic colours, typography must specify display/body treatment, and sections must list visually distinct blocks in order.
+- For a substantial website, the ui brief must describe: the hero composition, a recurring surface/card treatment, spacing rhythm, and one distinctive visual device (such as a soft mesh, image-led composition, asymmetric grid, subtle texture, or restrained motion). Do not use a visual device that the user did not request when it harms readability.
+- Plan interfaces that look intentionally art-directed: avoid a single vertical stack of text, identical cards everywhere, raw bullet lists, and generic gradient-blob SaaS layouts.
+- Do not choose a terminal, dark dashboard, or glassmorphism style by default. Use those styles only when the request or product context supports them.
+- Include real responsive composition changes in responsiveNotes (not only "stack on mobile").
 - Even when the user says "homepage", plan multiple files for a meaningful app. A train booking homepage should normally include reusable search, form, card, and route-data files.
 - Only use a single page file for a genuinely tiny static page; do not collapse interactive UI into Home.jsx.
 - RAW JSON ONLY — no markdown fences, no backticks, no text before or after

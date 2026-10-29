@@ -14,6 +14,28 @@ direction: create a polished, responsive interface with intentional hierarchy,
 typography, spacing, and interaction states. For substantial experiences,
 prefer a small set of focused components over a generic one-file mockup.
 
+QUALITY BAR:
+- Build a real, presentation-ready interface, not a wireframe or a text document.
+- Every substantial page needs a clear visual hierarchy: a distinctive hero or
+  primary surface, deliberate section rhythm, and thoughtfully designed cards,
+  controls, and hover/focus states where relevant.
+- Never default to a plain black terminal, raw bullet lists, unstyled links, or
+  a generic dashboard unless the user explicitly asks for that visual language.
+- Avoid repeating placeholder-like copy. Use the request to create a specific
+  visual identity, useful content grouping, and a responsive mobile layout.
+- If the request explicitly asks for a terminal aesthetic, make it feel like a
+  crafted product interface with strong hierarchy and interaction feedback,
+  not a browser page containing plain terminal text.
+- Execute the visual brief as a system: define consistent colour roles, a
+  readable type scale, spacing tokens, component radii, shadows, and states.
+  Do not scatter unrelated one-off styles across the page.
+- Make the first viewport compelling: give the hero a clear focal point and
+  support it with an intentional composition, not just a large heading above
+  paragraphs. Use imagery, illustration-like CSS, data visualisation, or a
+  structured product surface only when appropriate to the request.
+- Vary information density across sections. A page should have hierarchy and
+  pacing rather than identical full-width cards or repeated text blocks.
+
 Rules:
 - Do not call get_context or list_directory. The project context and validated plan are already provided.
 - If necessary, inspect the relevant source files in one read_multiple_files call. Do not repeatedly inspect files.
@@ -39,6 +61,7 @@ export async function runBuilderAgent({
   polish = false,
   compactFallback = false,
   forceWriteTool = false,
+  incremental = false,
   onUsage,
 }) {
   let readCalls = 0;
@@ -47,7 +70,7 @@ export async function runBuilderAgent({
   // Bedrock Qwen has high latency between ReAct turns. For normal builds,
   // give it only the one atomic write path so it cannot spend a full model
   // request reading and then another one deciding to write.
-  const bedrockFastPath = modelOptions.provider === 'bedrock' && !polish;
+  const bedrockFastPath = modelOptions.provider === 'bedrock' && !polish && !incremental;
   // Never let an agent continue consuming requests after the UI has received
   // a timeout. The old Promise.race left the LangGraph loop alive in the
   // background, which quickly exhausted free-tier Gemini quota.
@@ -96,12 +119,15 @@ export async function runBuilderAgent({
     }));
 
   const userPrompt = `${polish
-    ? 'Review the implementation against the UI direction below. Inspect the relevant source files once, then make a focused visual-polish edit. Improve hierarchy, spacing, responsive behavior, states, and consistency. Preserve working functionality and do not rewrite unrelated code.'
+    ? 'Review the implementation against the UI direction below. Inspect the relevant source files once, then make a focused visual-polish edit. Remove any wireframe, plain-text, or generic-template feel. Check the first viewport, visual hierarchy, type scale, palette roles, section rhythm, component states, and real mobile composition. Improve the weakest two areas with deliberate code changes. Preserve working functionality and do not rewrite unrelated code.'
     : repair
     ? 'The previous attempt did not write any project files. Immediately write the complete implementation; do not inspect files or explain first.'
     : 'Implement the validated plan now. Inspect relevant files at most once, then write the implementation.'}
 ${compactFallback
   ? '\nRECOVERY MODE: Write a complete, working UI in exactly one write_multiple_files call using only src/App.jsx and src/index.css. Do not create components, hooks, pages, data, or utility files. Keep it self-contained so the tool arguments are never truncated.'
+  : ''}
+${incremental
+  ? '\nINCREMENTAL UPDATE MODE: This is an existing project. First read the relevant files, then change only what the newest request requires. Preserve the existing visual design, working interactions, routes, and unrelated components. Do not replace the application with a new minimal page or scaffold.'
   : ''}
 ${bedrockFastPath
   ? '\nFAST BEDROCK MODE: Do not inspect files. Immediately make exactly one write_multiple_files call containing every complete file required by the validated plan. Then stop. Do not call any other tool or provide a preamble.'
@@ -128,10 +154,13 @@ ${userMessage}`;
       // 2–4K output tokens can cut the JSON tool arguments mid-file, which
       // LangChain reports as an invalid/truncated tool call. Give only this
       // write-first path enough room to finish its single atomic write.
-      maxTokens: compactFallback || bedrockFastPath ? 8192 : repair ? 4096 : polish ? 2560 : 4096,
+      // Most Vite apps fit comfortably in this budget. Keeping the initial
+      // one-shot Bedrock response bounded avoids multi-minute generations;
+      // compiler repair handles the rare invalid output afterward.
+      maxTokens: compactFallback ? 8192 : bedrockFastPath ? 6144 : repair ? 4096 : polish ? 4096 : 4096,
       // Implement and polish each get an intentional inspect/write/complete
       // budget instead of an open-ended ReAct loop.
-      maxSteps: repair ? 2 : 3,
+      maxSteps: repair || incremental ? 2 : 3,
       modelType: 'builder',
       agentName: 'builder',
       modelOptions,
@@ -143,16 +172,18 @@ ${userMessage}`;
       // Bedrock Qwen is fast when it sends the whole project as one atomic
       // write, but can otherwise create files one at a time. Pin the tool so
       // new builds need one request and one tool execution, not a slow chain.
-      toolChoice: repair || forceWriteTool || modelOptions.provider === 'bedrock'
+      toolChoice: repair || forceWriteTool || (modelOptions.provider === 'bedrock' && !incremental)
         ? 'write_multiple_files'
         : undefined,
       // Qwen Coder writes the full app atomically but can then leave a slow
       // follow-up turn open only to narrate a summary. Let it inspect first,
       // but terminate immediately after the first successful file write.
       // Compact recovery still stops after its mandatory one tool call.
-      stopAfterTool: compactFallback && forceWriteTool
+      stopAfterTool: incremental
+        ? [...WRITE_TOOLS]
+        : compactFallback && forceWriteTool
         ? true
-        : modelOptions.provider === 'bedrock'
+        : modelOptions.provider === 'bedrock' && !incremental
           ? [...WRITE_TOOLS]
           : false,
       // The worker already emits the real tool results. Suppress LangGraph's

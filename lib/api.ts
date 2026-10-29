@@ -66,6 +66,9 @@ export const projectsApi = {
   fileContent: (id: string, path: string) =>
     apiClient.get<{ file: ProjectFile }>(`/projects/${id}/files/${path}`).then((r) => r.data.file),
 
+  updateFile: (id: string, path: string, content: string) =>
+    apiClient.put<{ file: ProjectFile; liveUpdated: boolean }>(`/projects/${id}/files`, { path, content }).then((r) => r.data),
+
   restorePreview: (id: string) =>
     apiClient.post<{ previewUrl: string }>(`/projects/${id}/restore-preview`).then((r) => r.data),
 };

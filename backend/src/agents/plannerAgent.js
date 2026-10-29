@@ -27,7 +27,9 @@ export async function runPlannerAgent({
   // A plan with files, steps, and descriptions is often cut off at 1024
   // tokens, which then falls back to a generic template. Leave room for the
   // planner's real JSON response.
-  const model = makeModel('planner', 0, 2048, modelOptions);
+  // A small amount of variation avoids repeatedly producing the same generic
+  // component plan while remaining structured enough for JSON output.
+  const model = makeModel('planner', 0.25, 2048, modelOptions);
   const controller = new AbortController();
   let timeout;
   const deadline = new Promise((_, reject) => {

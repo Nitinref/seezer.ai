@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { EventEmitter } from 'events';
+import path from 'path';
 EventEmitter.defaultMaxListeners = 50;
 
 import { Worker } from 'bullmq';
@@ -14,6 +15,7 @@ import {
   CLAUDE_PLANNER_MODEL,
   OPENROUTER_VALIDATOR_MODEL,
   OPENROUTER_CHECKER_MODEL,
+  OPENROUTER_DEFAULT_MODEL,
   GROQ_VALIDATOR_MODEL,
   GROQ_CHECKER_MODEL,
   GROQ_PLANNER_MODEL,
@@ -26,6 +28,7 @@ import {
 } from '../utils/llm.js';
 import prisma from '../db/index.js';
 import { chargeUsageBatch, enforceMinimumBuildCharge } from '../services/credits.js';
+import { getBuildMemory, rememberBuildRequest } from '../services/memory.js';
 
 
 import { runPlannerAgent } from '../agents/plannerAgent.js';
@@ -35,6 +38,75 @@ import { runCheckerAgent } from '../agents/checkerAgent.js';
 
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Repair a very common generated-code error before opening the preview: a
+ * page in src/pages importing "./components/X" when X was created in
+ * src/components. Only paths with one unambiguous matching source file are
+ * changed, so this never guesses between multiple components with the same
+ * name or alters package imports.
+ */
+async function repairResolvableRelativeImports(sb) {
+  const listing = await sb.commands.run(
+    "find src -type f \\( -name '*.js' -o -name '*.jsx' -o -name '*.mjs' -o -name '*.cjs' \\) -print",
+    { cwd: '/app', timeoutMs: 20_000 },
+  );
+  if (listing.exitCode !== 0) return [];
+
+  const files = String(listing.stdout || '')
+    .split(/\r?\n/)
+    .map((file) => file.trim().replace(/\\/g, '/'))
+    .filter(Boolean);
+  const available = new Set(files);
+  const extensions = ['', '.js', '.jsx', '.mjs', '.cjs'];
+  const isResolved = (from, specifier) => {
+    const base = path.posix.normalize(path.posix.join(path.posix.dirname(from), specifier));
+    return extensions.some((extension) => available.has(`${base}${extension}`))
+      || extensions.slice(1).some((extension) => available.has(`${base}/index${extension}`));
+  };
+  const fixes = [];
+
+  for (const source of files) {
+    let content;
+    try { content = await sb.files.read(`/app/${source}`); } catch { continue; }
+    const rewritten = String(content).replace(
+      /((?:import|export)\s+(?:[\s\S]*?\s+from\s+)?)(["'])(\.{1,2}\/[^"']+)\2/g,
+      (whole, prefix, quote, specifier) => {
+        if (isResolved(source, specifier)) return whole;
+        const targetName = path.posix.basename(specifier).replace(/\.(?:js|jsx|mjs|cjs)$/, '').toLowerCase();
+        const matches = files.filter((file) =>
+          path.posix.basename(file).replace(/\.(?:js|jsx|mjs|cjs)$/, '').toLowerCase() === targetName,
+        );
+        if (matches.length !== 1) return whole;
+        let relative = path.posix.relative(path.posix.dirname(source), matches[0]).replace(/\.(?:js|jsx|mjs|cjs)$/, '');
+        if (!relative.startsWith('.')) relative = `./${relative}`;
+        fixes.push({ source, from: specifier, to: relative });
+        return `${prefix}${quote}${relative}${quote}`;
+      },
+    );
+    if (rewritten !== content) await sb.files.write(`/app/${source}`, rewritten);
+  }
+  return fixes;
+}
+
+// Preserve the actionable compiler/linter output for a targeted builder
+// repair, without flooding the next model prompt with an entire build log.
+function buildFailureDiagnostics(verification) {
+  const build = verification?.build ?? {};
+  const lint = verification?.lint ?? {};
+  const details = [
+    build.error,
+    build.stderr,
+    build.stdout,
+    lint.exitCode && lint.stderr,
+    lint.exitCode && lint.stdout,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).trim())
+    .filter(Boolean)
+    .join('\n\n');
+  return details.slice(-6_000) || 'The build command failed without diagnostic output.';
+}
 // Pipeline events do not otherwise carry the Bull job identifier. Retaining
 // it for the active run lets a reconnected client still expose a real Stop
 // control while BullMQ retries the same job.
@@ -449,7 +521,19 @@ async function collectSandboxFiles(sb, dirPath) {
 
 async function startPreviewServer(sb, projectId, chatId, logger) {
   try {
-    await sb.files.write('/app/vite.config.js',
+    let listening = false;
+    // Most follow-ups reuse a live Vite server, which already receives source
+    // changes through HMR. Avoid reinstalling dependencies and restarting it
+    // on every small edit.
+    try {
+      const probe = await sb.commands.run('curl -fsS http://127.0.0.1:5173 >/dev/null', { cwd: '/app', timeoutMs: 5_000 });
+      listening = probe.exitCode === 0;
+    } catch { }
+
+    if (!listening) {
+      // Only touch Vite configuration when starting a new server. Rewriting
+      // it during a live follow-up causes Vite to reload and defeats HMR.
+      await sb.files.write('/app/vite.config.js',
 `import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -458,34 +542,37 @@ export default defineConfig({
   server: { host: true, port: 5173, strictPort: true, allowedHosts: true }
 })
 `);
-    // A newly recreated E2B sandbox only contains files restored from the
-    // database; dependencies such as Vite are not part of that restore.
-    // Install them before launching the dev server so an expired sandbox can
-    // produce a fresh preview URL on the same build run.
-    const install = await sb.commands.run('npm install --no-audit --no-fund', {
-      cwd: '/app',
-      timeoutMs: 120_000,
-    });
-    if (install.exitCode !== 0) {
-      throw new Error(`Dependency install failed: ${String(install.stderr || install.stdout).slice(-500)}`);
-    }
-    // A reused sandbox may still have the previous Vite process alive. If we
-    // leave it running, strictPort makes the new server fail and the preview
-    // silently keeps serving the old scaffold.
-    await sb.commands.run("pkill -f 'vite.*5173' >/dev/null 2>&1 || true", { cwd: '/app', timeoutMs: 10_000 }).catch(() => { });
-    await sleep(500);
-    // Keep the dev server detached from the command request. Some sandbox
-    // runtimes terminate `background: true` processes when that request ends.
-    await sb.commands.run(
-      'nohup npm run dev -- --host 0.0.0.0 --port 5173 >/tmp/sizzer-vite.log 2>&1 </dev/null &',
-      { cwd: '/app', timeoutMs: 10_000 }
-    );
-    let listening = false;
-    for (let attempt = 0; attempt < 10; attempt++) {
+      // A newly recreated E2B sandbox has restored source files but no
+      // node_modules. Only install when Vite is actually absent.
+      let dependenciesReady = false;
       try {
-        await sb.commands.run('curl -fsS http://127.0.0.1:5173 >/dev/null', { cwd: '/app', timeoutMs: 5_000 });
-        listening = true;
-        break;
+        await sb.files.read('/app/node_modules/vite/package.json');
+        dependenciesReady = true;
+      } catch { }
+      if (!dependenciesReady) {
+        const install = await sb.commands.run('npm install --no-audit --no-fund', {
+          cwd: '/app', timeoutMs: 120_000,
+        });
+        if (install.exitCode !== 0) {
+          throw new Error(`Dependency install failed: ${String(install.stderr || install.stdout).slice(-500)}`);
+        }
+      }
+      await sb.commands.run("pkill -f 'vite.*5173' >/dev/null 2>&1 || true", { cwd: '/app', timeoutMs: 10_000 }).catch(() => { });
+      await sleep(500);
+      await sb.commands.run(
+        'nohup npm run dev -- --host 0.0.0.0 --port 5173 >/tmp/sizzer-vite.log 2>&1 </dev/null &',
+        { cwd: '/app', timeoutMs: 10_000 }
+      );
+    }
+
+    for (let attempt = 0; !listening && attempt < 10; attempt++) {
+      try {
+        const probe = await sb.commands.run('curl -fsS http://127.0.0.1:5173 >/dev/null', { cwd: '/app', timeoutMs: 5_000 });
+        if (probe.exitCode === 0) {
+          listening = true;
+          break;
+        }
+        await sleep(1000);
       } catch { await sleep(1000); }
     }
     if (!listening) {
@@ -573,20 +660,43 @@ async function processBuildJob(job) {
       activeBuildJobsByChat.delete(chatId);
       return { discarded: true, reason: 'chat_deleted' };
     }
-    const billUsage = (agent, options = {}) => async (usage) => {
+    const resolveModel = (agent, options = {}) => {
       const activeProvider = options.provider ?? AGENT_PROVIDERS[agent] ?? 'openrouter';
       const activeModel = options.model ?? (activeProvider === 'gemini' ? GEMINI_MODEL : activeProvider === 'nvidia'
         ? NVIDIA_DEEPSEEK_MODEL : activeProvider === 'groq'
-          ? (agent === 'planner' ? GROQ_PLANNER_MODEL : GROQ_BUILDER_MODEL)
+          ? (agent === 'planner' ? GROQ_PLANNER_MODEL : agent === 'validator' ? GROQ_VALIDATOR_MODEL : agent === 'checker' ? GROQ_CHECKER_MODEL : GROQ_BUILDER_MODEL)
           : activeProvider === 'bedrock'
             ? (agent === 'planner' ? BEDROCK_PLANNER_MODEL : BEDROCK_BUILDER_MODEL)
-          : undefined);
+          : activeProvider === 'openrouter'
+            ? (agent === 'validator' ? OPENROUTER_VALIDATOR_MODEL : agent === 'checker' ? OPENROUTER_CHECKER_MODEL : OPENROUTER_DEFAULT_MODEL)
+            : undefined);
+      return { activeProvider, activeModel };
+    };
+    const reportModel = async (agent, options = {}, stage = 'building') => {
+      const { activeProvider, activeModel } = resolveModel(agent, options);
+      const payload = { level: 'info', event: 'model_selected', jobId: String(job.id), agent, provider: activeProvider, model: activeModel, ts: new Date().toISOString() };
+      console.log(JSON.stringify(payload));
+      logger._log('info', 'Model selected', payload);
+      await emit(chatId, stage, `Using ${agent} model: ${activeProvider}/${activeModel ?? 'default'}.`);
+    };
+    const billUsage = (agent, options = {}) => async (usage) => {
+      const { activeProvider, activeModel } = resolveModel(agent, options);
       pendingUsage.push({ agent, provider: activeProvider, model: activeModel, usage });
     };
     // A cancelled job must be handled below rather than escape before this
     // try/catch; otherwise BullMQ retries the same cancellation as a failure.
     await throwIfBuildStopped(job);
     await emit(chatId, 'start', 'Build job received — pipeline starting…');
+    const initialModels = ['planner', 'builder', 'validator', 'checker'].map((agent) => ({
+      agent,
+      ...resolveModel(agent, modelOptions),
+    }));
+    const modelConfiguration = {
+      level: 'info', event: 'build_model_configuration', jobId: String(job.id), models: initialModels, ts: new Date().toISOString(),
+    };
+    console.log(JSON.stringify(modelConfiguration));
+    logger._log('info', 'Build model configuration', modelConfiguration);
+    await emit(chatId, 'model', `Models ready — ${initialModels.map(({ agent, activeProvider, activeModel }) => `${agent}: ${activeProvider}/${activeModel ?? 'default'}`).join(' · ')}`);
     logger._log('info', 'Pipeline started', {
       projectId,
       msg: userMessage.slice(0, 80),
@@ -677,6 +787,18 @@ export default defineConfig({
       const saved = JSON.parse(await toolMap.get_context.execute({ key: 'builder' }));
       if (saved?.plan && Array.isArray(saved.plan.files)) savedPlan = saved.plan;
     } catch { }
+    // Sandboxes are ephemeral. Mirror the builder plan in Postgres so a
+    // logout, worker restart, or expired E2B sandbox cannot reset a project
+    // to a blank first-build experience.
+    if (!savedPlan) {
+      try {
+        const durable = await prisma.buildContext.findUnique({ where: { chatId }, select: { context: true } });
+        const context = durable?.context;
+        if (context?.plan && Array.isArray(context.plan.files)) savedPlan = context.plan;
+      } catch (error) {
+        logger._log('warn', 'Could not restore durable builder context', { error: error?.message ?? String(error) });
+      }
+    }
 
     // A follow-up request must be treated as an edit to the current project,
     // even if the last build ended after writing files but before producing a
@@ -695,7 +817,7 @@ export default defineConfig({
       .map((m) => `${m.role.toUpperCase()}: ${m.content.slice(0, 200)}`)
       .join('\n');
 
-    const hasPriorProjectContext = previousMessages.length > 0 || Boolean(savedPlan);
+    const hasPriorProjectContext = previousMessages.length > 0 || Boolean(savedPlan) || projectFilePaths.length > 0;
     const previousPlanBrief = savedPlan ? JSON.stringify({
       summary: savedPlan.summary,
       approach: savedPlan.approach,
@@ -705,8 +827,16 @@ export default defineConfig({
     const continuationContext = hasPriorProjectContext
       ? `This is a follow-up to an existing project. Preserve the current implementation and make an incremental change; do not recreate the app from scratch.\nPersisted project files: ${projectFilePaths.join(', ') || '(files will be inspected in the sandbox)'}${previousPlanBrief ? `\nPrevious build brief: ${previousPlanBrief}` : ''}`
       : '';
+    const memories = await getBuildMemory({
+      userId: chatOwner.userId,
+      query: userMessage,
+    });
+    const memoryContext = memories.length
+      ? `Durable user preferences from earlier projects (apply only when relevant; the newest user request wins):\n${memories.map((memory) => `- ${memory}`).join('\n')}`
+      : '';
     const fullPrompt = [
       continuationContext,
+      memoryContext,
       trimmedHistory ? `Previous conversation:\n${trimmedHistory}` : '',
       `Request: ${userMessage}`,
     ].filter(Boolean).join('\n\n');
@@ -768,7 +898,23 @@ export default defineConfig({
     // with the exact last validated plan and persisted source files—not spend
     // another planning turn and risk recreating the app from scratch.
     const resumeFailedBuild = Boolean(savedPlan) && isRecoveryRequest(userMessage);
-    let planObj = resumeFailedBuild ? savedPlan : null;
+    // A normal follow-up is an incremental edit. Reuse the existing plan and
+    // source tree instead of generating a new, simpler app from scratch.
+    // Chat history alone is enough to identify a follow-up. ProjectFile sync
+    // can briefly lag behind a completed build, and must not make the next
+    // instruction look like a brand-new website request.
+    const continueExistingProject = hasPriorProjectContext && !resumeFailedBuild;
+    const existingProjectPlan = savedPlan ?? {
+      summary: 'Apply a focused update to the existing website',
+      approach: 'Read the current source first and change only the section requested by the user.',
+      homeComponent: 'src/pages/Home.jsx',
+      files: projectFilePaths.map((path) => ({ path, action: 'update', description: 'Existing project file; preserve unless the request requires a change.' })),
+      newPages: [],
+      packages: [],
+      steps: ['Inspect the relevant existing files', 'Apply the requested focused change', 'Verify the build'],
+      ui: { visualDirection: 'Preserve the current design', palette: [], typography: '', sections: [], interactions: [], responsiveNotes: '' },
+    };
+    let planObj = (resumeFailedBuild || continueExistingProject) ? (savedPlan ?? existingProjectPlan) : null;
     let previewUrl = null;
 
     if (hasCheckpoint('planned')) {
@@ -786,7 +932,7 @@ export default defineConfig({
       buildFailed = false;
       const isReplan = replanCount > 0;
 
-      const resumePlanner = (hasCheckpoint('planned') || resumeFailedBuild) && !isReplan;
+      const resumePlanner = (hasCheckpoint('planned') || resumeFailedBuild || continueExistingProject) && !isReplan;
 
       // ── STEP 2: PlannerAgent ──────────────────────────────────────────
       if (!resumePlanner) {
@@ -804,6 +950,7 @@ export default defineConfig({
 
       let planOutput;
       try {
+        await reportModel('planner', modelOptions, 'planning');
         planOutput = await withRetry(() =>runPlannerAgent({
   prompt: planPrompt,
   emit,
@@ -877,14 +1024,24 @@ export default defineConfig({
       }
 
       try {
+        const builderContext = { plan: planObj, replanCount, lastError };
         await toolMap.save_context.execute({
           key: 'builder',
-          context: JSON.stringify({ plan: planObj, replanCount, lastError }),
+          context: JSON.stringify(builderContext),
+        });
+        await prisma.buildContext.upsert({
+          where: { chatId },
+          update: { context: builderContext },
+          create: { chatId, context: builderContext },
         });
       } catch { }
       }
       else if (resumeFailedBuild) {
         await emit(chatId, 'planning', 'Resuming the previous build plan and repairing the existing files.', { plan: planObj });
+      } else if (continueExistingProject) {
+        // A normal follow-up goes straight to the Builder. Do not present it
+        // as a fresh planning pass in the timeline.
+        await emit(chatId, 'building', 'Applying the requested change to the existing project.');
       }
 
       
@@ -895,6 +1052,11 @@ export default defineConfig({
       const builderModelOptions = modelOptions.provider
         ? modelOptions
         : { provider: AGENT_PROVIDERS.builder };
+      const builderPrompt = isReplan && lastError?.diagnostic
+        ? `${fullPrompt}\n\nTARGETED BUILD REPAIR:\nThe previous build failed with the diagnostic below. Inspect the files named by this error and fix this specific failure. Preserve the existing implementation; do not redesign or replace unrelated parts. After the fix, ensure all affected imports, exports, and references are consistent.\n\n${lastError.diagnostic}`
+        : continueExistingProject
+          ? `${fullPrompt}\n\nINCREMENTAL CHANGE REQUEST: This is an existing website. Keep its current design, content, and functionality unless the newest request explicitly changes them. Read the relevant existing files first; edit only the requested feature or section. Never replace the app with a simpler one-page implementation.`
+          : fullPrompt;
       if (!resumeBuilder) {
       await throwIfBuildStopped(job);
       await emit(chatId, 'building',
@@ -908,10 +1070,13 @@ export default defineConfig({
         // provider-tool-call failures.
         const runBuildPass = async (options, label, compactFallback = false) => {
           const activeProvider = options.provider ?? AGENT_PROVIDERS.builder;
+          await reportModel('builder', options, 'building');
           // Gemini can take longer to prepare a complete tool-call response.
           // Give it the same bounded window as the builder agent before
           // switching to the recovery provider.
-          const timeoutMs = ['gemini', 'bedrock'].includes(activeProvider) ? 180_000 : undefined;
+          // Do not let a single slow hosted generation block the whole build
+          // for three minutes. A timed-out no-write pass falls back to Groq.
+          const timeoutMs = ['gemini', 'bedrock'].includes(activeProvider) ? 120_000 : undefined;
           // A retry against an overloaded free Gemini endpoint only makes the
           // UI appear stuck and can consume the remaining quota. Hand control
           // to Qwen immediately; other providers retain one bounded retry.
@@ -919,7 +1084,7 @@ export default defineConfig({
           let result = await withRetry(
             () => runBuilderAgent({
               plan: planObj,
-              userMessage: fullPrompt,
+              userMessage: builderPrompt,
               tools: builderTools,
               emit,
               chatId,
@@ -927,6 +1092,7 @@ export default defineConfig({
               onUsage: billUsage('builder', options),
               compactFallback,
               forceWriteTool: compactFallback,
+              incremental: continueExistingProject || resumeFailedBuild || isReplan,
               ...(timeoutMs ? { timeoutMs } : {}),
             }),
             retries, label
@@ -938,7 +1104,7 @@ export default defineConfig({
             result = await withRetry(
               () => runBuilderAgent({
                 plan: planObj,
-                userMessage: fullPrompt,
+                userMessage: builderPrompt,
                 tools: builderWriteTools,
                 emit,
                 chatId,
@@ -947,6 +1113,7 @@ export default defineConfig({
                 repair: true,
                 compactFallback,
                 forceWriteTool: compactFallback,
+                incremental: continueExistingProject || resumeFailedBuild || isReplan,
                 ...(timeoutMs ? { timeoutMs } : {}),
               }),
               retries, `${label}Repair`
@@ -991,14 +1158,18 @@ export default defineConfig({
       // Rich screens receive one deliberate UI pass. This is not a generic
       // retry: it spends a bounded model call on hierarchy, responsiveness,
       // and interaction polish only when the plan represents a real UI.
-      // Bedrock Qwen performs the requested visual implementation in its
-      // atomic write. A second polish call costs another full model turn and
-      // previously kept the user waiting after a completed build.
-      if (!isReplan && builderModelOptions.provider !== 'bedrock' && needsUiPolish(fullPrompt, planObj)) {
+      // A first pass prioritizes reliably writing all project files. A
+      // separate bounded polish pass is what turns that functional output
+      // into a presentation-ready interface, including for Bedrock Qwen.
+      // A second full model pass materially improves visual work but also
+      // doubles first-build latency. Keep it opt-in; the primary builder
+      // prompt still enforces the visual quality bar.
+      if (process.env.UI_POLISH_ENABLED === 'true' && !isReplan && !continueExistingProject && needsUiPolish(fullPrompt, planObj)) {
         await throwIfBuildStopped(job);
         await emit(chatId, 'refining', 'Refining visual hierarchy and responsive details…');
         logger.startStage('UiPolishAgent');
         try {
+          await reportModel('builder', builderModelOptions, 'refining');
           const polishResult = await runBuilderAgent({
             plan: planObj,
             userMessage: fullPrompt,
@@ -1007,6 +1178,7 @@ export default defineConfig({
             chatId,
             modelOptions: builderModelOptions,
             polish: true,
+            incremental: continueExistingProject || resumeFailedBuild || isReplan,
             onUsage: billUsage('builder', builderModelOptions),
           });
           if (polishResult.wroteFiles) {
@@ -1026,6 +1198,20 @@ export default defineConfig({
       }
       } else {
         await emit(chatId, 'building', 'Builder already completed; continuing from checkpoint.');
+      }
+
+      // Generated component trees commonly place shared components in
+      // src/components while a page imports them as ./components/*. Repair
+      // those unambiguous relative paths before Vite is started or evaluated.
+      try {
+        const importFixes = await repairResolvableRelativeImports(sb);
+        if (importFixes.length) {
+          logger._log('info', 'Repaired generated relative imports', { importFixes });
+          await emit(chatId, 'building', `Repaired ${importFixes.length} component import path${importFixes.length === 1 ? '' : 's'}.`);
+        }
+      } catch (error) {
+        // This safety net must never make an otherwise valid build fail.
+        logger._log('warn', 'Relative import repair skipped', { error: error?.message ?? String(error) });
       }
 
       // Make the first usable preview available before optional review agents run.
@@ -1061,6 +1247,54 @@ export default defineConfig({
           });
           await job.updateProgress({ percent: 85 + replanCount * 3, stage: 'checked' });
           await emit(chatId, 'checking', 'Fast internal verification passed; review agents skipped.');
+        } else {
+          const diagnostic = buildFailureDiagnostics(fastCheck);
+          lastError = {
+            buildStatus: 'failed',
+            lintStatus: fastCheck.lint?.skipped ? 'skipped' : 'failed',
+            errorType: classifyError(diagnostic),
+            diagnostic,
+          };
+
+          // Syntax, import, and JSX errors have a precise compiler location.
+          // Send that location directly to a fast repair builder instead of
+          // waiting through both general-purpose review agents first.
+          if (/(?:unexpected token|syntaxerror|failed to resolve import|does not provide an export|is not defined)/i.test(diagnostic)) {
+            await emit(chatId, 'building', 'Compiler error found; applying a targeted source repair…');
+            try {
+              await reportModel('builder', { provider: 'groq' }, 'building');
+              const repairResult = await runBuilderAgent({
+                plan: planObj,
+                userMessage: `${fullPrompt}\n\nTARGETED COMPILER REPAIR: The production build failed. Read the file and line named below, then fix only this syntax/import/reference error. Preserve the existing design and all unrelated code.\n\n${diagnostic}`,
+                tools: builderTools,
+                emit,
+                chatId,
+                modelOptions: { provider: 'groq' },
+                incremental: true,
+                onUsage: billUsage('builder', { provider: 'groq' }),
+              });
+              if (repairResult.wroteFiles) {
+                const repairedRaw = await toolMap.verify_project.execute({});
+                await emit(chatId, 'tool', JSON.stringify({
+                  ...publicToolDetails('verify_project', repairedRaw), args: {},
+                }));
+                const repairedCheck = JSON.parse(repairedRaw);
+                if (repairedCheck.success === true) {
+                  fastCheckPassed = true;
+                  checkOutput = 'Build passed after targeted compiler repair.';
+                  await toolMap.save_context.execute({
+                    key: 'checker',
+                    context: JSON.stringify({ buildStatus: 'passed', lintStatus: repairedCheck.lint?.skipped ? 'skipped' : 'passed', ready: true, buildAttempts: 2 }),
+                  });
+                  await emit(chatId, 'checking', 'Compiler repair verified; review agents skipped.');
+                } else {
+                  lastError.diagnostic = buildFailureDiagnostics(repairedCheck);
+                }
+              }
+            } catch (error) {
+              logger._log('warn', 'Targeted compiler repair skipped', { error: error?.message ?? String(error) });
+            }
+          }
         }
       } catch (err) {
         await emit(chatId, 'checking', `Fast verification unavailable; continuing with review agents. ${err.message}`);
@@ -1074,6 +1308,7 @@ export default defineConfig({
       logger.startStage('CodeValidatorAgent');
 
       try {
+        await reportModel('validator', modelOptions, 'validating');
         await withRetry(
           () => runValidatorAgent({ tools: validatorTools ,emit,chatId,modelOptions, onUsage: billUsage('validator')}),
           1, 'CodeValidatorAgent'
@@ -1100,6 +1335,7 @@ export default defineConfig({
       logger.startStage('AppCheckerAgent');
 
       try {
+        await reportModel('checker', modelOptions, 'checking');
         checkOutput = await withRetry(
           () => runCheckerAgent({ tools: checkerTools,emit,chatId,modelOptions, onUsage: billUsage('checker') }),
           1, 'AppCheckerAgent'
@@ -1117,6 +1353,52 @@ export default defineConfig({
       await job.updateProgress({ percent: 85 + replanCount * 3, stage: 'checked' });
       }
 
+      // Do not rely on an agent's textual assessment to decide whether a
+      // repair worked. Re-run the deterministic check and retain its actual
+      // compiler output for the next builder pass when it did not.
+      if (!fastCheckPassed) {
+        try {
+          const repairCheckRaw = await toolMap.verify_project.execute({});
+          await emit(chatId, 'tool', JSON.stringify({
+            ...publicToolDetails('verify_project', repairCheckRaw),
+            args: {},
+          }));
+          const repairCheck = JSON.parse(repairCheckRaw);
+          if (repairCheck.success === true) {
+            checkOutput = 'Build passed after targeted review repair.';
+            await toolMap.save_context.execute({
+              key: 'checker',
+              context: JSON.stringify({
+                buildStatus: 'passed',
+                lintStatus: repairCheck.lint?.skipped ? 'skipped' : 'passed',
+                ready: true,
+                buildAttempts: 2,
+              }),
+            });
+          } else {
+            const diagnostic = buildFailureDiagnostics(repairCheck);
+            checkOutput = diagnostic;
+            lastError = {
+              buildStatus: 'failed',
+              lintStatus: repairCheck.lint?.skipped ? 'skipped' : 'failed',
+              errorType: classifyError(diagnostic),
+              diagnostic,
+            };
+            await toolMap.save_context.execute({
+              key: 'checker',
+              context: JSON.stringify({
+                buildStatus: 'failed',
+                lintStatus: lastError.lintStatus,
+                ready: false,
+                buildAttempts: 2,
+              }),
+            });
+          }
+        } catch (error) {
+          logger._log('warn', 'Post-repair build verification unavailable', { error: error?.message ?? String(error) });
+        }
+      }
+
       try {
         const raw = await toolMap.get_context.execute({ key: 'checker' });
         const ctx = JSON.parse(raw);
@@ -1126,7 +1408,7 @@ export default defineConfig({
             buildStatus: ctx.buildStatus,
             lintStatus: ctx.lintStatus,
             errorType: classifyError(checkOutput ?? ''),
-            snippet: (checkOutput ?? '').slice(0, 600),
+            diagnostic: lastError?.diagnostic ?? (checkOutput ?? '').slice(-6_000),
           };
           logger._log('warn', `Build failed — replan ${replanCount + 1}/${MAX_REPLANS}`, lastError);
           await emit(chatId, 'error', `Build failed (${lastError.errorType}). Re-planning…`, { lastError });
@@ -1248,6 +1530,16 @@ export default defineConfig({
         metadata: { jobId: job.id, previewUrl, replanCount, tokens: tokenSummary },
       },
     }).catch((error) => logger._log('warn', 'Skipped final message because chat no longer exists.', { error: error.message }));
+
+    // Mem0 extracts durable requirements such as brand, style, and preferred
+    // stack from the user's request. Do not save failed attempts as memory.
+    if (!buildFailed) {
+      await rememberBuildRequest({
+        userId: chatOwner.userId,
+        projectId,
+        request: userMessage,
+      });
+    }
 
     logger.endStage('pipeline', { replanCount, previewUrl, tokens: tokenSummary });
     await logger.publishTelemetry();

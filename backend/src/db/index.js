@@ -1,6 +1,10 @@
-import { PrismaClient } from '@prisma/client';
+// Prisma Client is CommonJS in this installed Prisma release. Default import
+// keeps the ESM backend compatible with Node's CommonJS interop.
+import PrismaClientPackage from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
+
+const { PrismaClient } = PrismaClientPackage;
 
 const isDev = process.env.NODE_ENV !== 'production';
 const logQueries = process.env.PRISMA_LOG_QUERIES === 'true';

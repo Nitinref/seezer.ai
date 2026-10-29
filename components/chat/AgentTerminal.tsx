@@ -96,6 +96,8 @@ function toActivity(event: PipelineEvent): Activity | null {
       ? "Writing the plan"
       : message.includes("Resuming from saved build plan")
         ? "Reading the saved plan"
+        : message.includes("Continuing the existing project")
+          ? "Editing the existing project"
         : "Choosing how to build it";
     return {
       event,
