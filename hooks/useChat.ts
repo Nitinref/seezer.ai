@@ -48,11 +48,22 @@ export function useChat(chatId: string | null) {
     queryKey: ["pipeline-events", resolvedChatId],
     queryFn: () => chatApi.pipelineEvents(resolvedChatId!),
     enabled: !!resolvedChatId,
+    // WebSocket remains the fast path. This makes Docker/backend restarts or
+    // a missed Redis frame recover visibly instead of leaving the timeline on
+    // "Build models selected" while the worker is still progressing.
+    refetchInterval: isBuilding ? 3_000 : false,
+    refetchIntervalInBackground: true,
   });
 
   useEffect(() => {
-    if (pipelineEventsQuery.data) setPipelineEvents(pipelineEventsQuery.data);
-  }, [pipelineEventsQuery.data, setPipelineEvents]);
+    if (!pipelineEventsQuery.data) return;
+    setPipelineEvents(pipelineEventsQuery.data);
+    const latest = pipelineEventsQuery.data.at(-1);
+    if (latest?.type === "pipeline_update" && ["done", "error"].includes(latest.stage ?? "")) {
+      setIsBuilding(false);
+      setActiveJobId(null);
+    }
+  }, [pipelineEventsQuery.data, setActiveJobId, setIsBuilding, setPipelineEvents]);
 
   // Hot reloads, a backend restart, or a dropped WebSocket can leave a build
   // spinner in the Zustand store after BullMQ has already removed the job.
@@ -74,15 +85,18 @@ export function useChat(chatId: string | null) {
       return () => { cancelled = true; };
     }
 
-    chatApi.jobStatus(activeJobId)
-      .then(({ state }) => {
-        if (!['active', 'waiting', 'delayed', 'prioritized', 'waiting-children'].includes(state)) {
-          clearStaleBuild();
-        }
-      })
-      .catch(clearStaleBuild);
-
-    return () => { cancelled = true; };
+    const checkJob = () => {
+      chatApi.jobStatus(activeJobId)
+        .then(({ state }) => {
+          if (!['active', 'waiting', 'delayed', 'prioritized', 'waiting-children'].includes(state)) {
+            clearStaleBuild();
+          }
+        })
+        .catch(clearStaleBuild);
+    };
+    checkJob();
+    const interval = window.setInterval(checkJob, 5_000);
+    return () => { cancelled = true; window.clearInterval(interval); };
   }, [activeJobId, isBuilding, setActiveJobId, setBuildProgress, setIsBuilding]);
 
   // Connect WebSocket when chatId changes

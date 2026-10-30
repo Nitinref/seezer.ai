@@ -1,6 +1,16 @@
 import type { PipelineEvent } from "@/types";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3000";
+// The frontend is normally served on :3000 while the API/WebSocket server is
+// on :3001. The old fallback pointed back at Next.js (:3000), so a missing or
+// stale public env value silently prevented the browser from ever opening a
+// WebSocket. Keep an explicit deployment URL when supplied; otherwise derive
+// the current host and connect to the backend port.
+const configuredWsUrl = process.env.NEXT_PUBLIC_WS_URL;
+const WS_URL = configuredWsUrl && !/^(?:ws|wss):\/\/localhost:3000\/?$/i.test(configuredWsUrl)
+  ? configuredWsUrl.replace(/\/$/, "")
+  : typeof window === "undefined"
+    ? "ws://localhost:3001"
+    : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:3001`;
 
 export type WsEventHandler = (event: PipelineEvent) => void;
 

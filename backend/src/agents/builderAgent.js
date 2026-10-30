@@ -100,6 +100,14 @@ export async function runBuilderAgent({
   let wroteFiles = false;
   let writeCalls = 0;
   const writtenPaths = new Set();
+  const recordWrittenPath = (value) => {
+    if (typeof value !== 'string') return;
+    const normalized = value
+      .replace(/\\/g, '/')
+      .replace(/^\/app\//, '')
+      .replace(/^\/+/, '');
+    if (normalized.startsWith('src/')) writtenPaths.add(normalized);
+  };
   // Qwen's Bedrock tool calls are unreliable unless its first action is a
   // named atomic write. DeepSeek V3.2 is different: it produces much better
   // complete apps through the normal tool loop. Do not force DeepSeek into
@@ -152,6 +160,12 @@ export async function runBuilderAgent({
             const parsed = JSON.parse(toolResult);
             writeSucceeded = parsed?.ok === true || parsed?.success === true
               || (Array.isArray(parsed?.results) && parsed.results.length > 0 && parsed.results.every((item) => item?.success !== false));
+            if (WRITE_TOOLS.has(target.name) && writeSucceeded) {
+              for (const path of [
+                ...(Array.isArray(parsed?.changed_files) ? parsed.changed_files : []),
+                ...(Array.isArray(parsed?.results) ? parsed.results.map((file) => file?.path) : []),
+              ]) recordWrittenPath(path);
+            }
           } catch {
             // ToolNode may turn a thrown tool error into plain text.
             writeSucceeded = !/(?:tool error|\berror:|edit_files:|create_file:|write_multiple_files:|delete_file:)/i.test(toolResult);
@@ -172,9 +186,7 @@ export async function runBuilderAgent({
               : target.name === 'edit_files'
                 ? (Array.isArray(input?.edits) ? input.edits.map((edit) => edit?.path) : [])
                 : [input?.path];
-            for (const filePath of changedPaths) {
-              if (typeof filePath === 'string' && filePath.startsWith('src/')) writtenPaths.add(filePath.replace(/^\/+/, ''));
-            }
+            for (const filePath of changedPaths) recordWrittenPath(filePath);
             writeCalls += 1;
             wroteFiles = true;
           }
