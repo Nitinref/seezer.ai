@@ -2,6 +2,15 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { makeModel, PLANNER_TIMEOUT_MS } from '../utils/llm.js';
 import { PLANNER_SYSTEM } from '../prompts/prompts.js';
 
+// Groq's Qwen route has a tight output-per-minute ceiling. The full visual
+// planning brief can make it reach that limit midway through a JSON array,
+// leaving the Builder with an invalid/truncated plan. Keep the same schema,
+// but bound every variable-length field so the closing brace is always sent.
+const COMPACT_GROQ_PLANNER_SYSTEM = `You are a React architect. Return ONLY one valid raw JSON object; no markdown.
+Use exactly this shape:
+{"summary":"","approach":"","homeComponent":"src/pages/Home.jsx","files":[{"path":"src/pages/Home.jsx","action":"update","description":""}],"newPages":[],"packages":[],"steps":[],"ui":{"visualDirection":"","palette":[],"typography":"","sections":[],"interactions":[],"responsiveNotes":""}}
+Rules: files max 6, steps max 4, sections max 5, interactions max 4, palette max 4. For any multi-section UI, include Home.jsx plus at least two focused files under src/components/ or src/data/. Keep every string under 90 characters. Use only installed packages. Start with { and end with }.`;
+
 function extractJSON(text) {
   if (typeof text !== 'string') return text;
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
@@ -29,8 +38,10 @@ export async function runPlannerAgent({
   // larger planning budget for detailed JSON.
   // A small amount of variation avoids repeatedly producing the same generic
   // component plan while remaining structured enough for JSON output.
-  const maxTokens = (modelOptions.provider ?? process.env.PLANNER_PROVIDER) === 'groq'
-    ? 900
+  const provider = modelOptions.provider ?? process.env.PLANNER_PROVIDER;
+  const useCompactGroqPlan = provider === 'groq';
+  const maxTokens = useCompactGroqPlan
+    ? 650
     : 2048;
   const model = makeModel('planner', 0.25, maxTokens, modelOptions);
   const controller = new AbortController();
@@ -44,7 +55,7 @@ export async function runPlannerAgent({
   let result;
   try {
     const invocation = model.invoke([
-      new SystemMessage(PLANNER_SYSTEM),
+      new SystemMessage(useCompactGroqPlan ? COMPACT_GROQ_PLANNER_SYSTEM : PLANNER_SYSTEM),
       new HumanMessage(prompt),
     ], { signal: controller.signal });
     // Some provider adapters ignore AbortSignal while waiting for a response.

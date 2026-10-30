@@ -99,12 +99,19 @@ export async function runBuilderAgent({
   let readCalls = 0;
   let wroteFiles = false;
   let writeCalls = 0;
-  // A fresh build starts with a write, but it may need more than one write
-  // pass when a plan contains many components. The root files are deliberately
-  // prioritised in the prompt: native Bedrock Qwen may choose create_file
-  // calls even when a named tool choice was requested.
-  const initialWritePath = initialBuild && !polish && !incremental;
-  const bedrockFastPath = modelOptions.provider === 'bedrock' && !polish && !incremental;
+  const writtenPaths = new Set();
+  // Qwen's Bedrock tool calls are unreliable unless its first action is a
+  // named atomic write. DeepSeek V3.2 is different: it produces much better
+  // complete apps through the normal tool loop. Do not force DeepSeek into
+  // the text "file envelope" path, which commonly returns only Home.jsx.
+  const strictInitialWritePath = initialBuild
+    && !polish
+    && !incremental
+    && modelOptions.model !== 'deepseek.v3.2';
+  const bedrockFastPath = modelOptions.provider === 'bedrock'
+    && modelOptions.model === 'qwen.qwen3-coder-next'
+    && !polish
+    && !incremental;
   const grokMantle = modelOptions.provider === 'bedrock' && modelOptions.model === 'xai.grok-4.3';
   // Never let an agent continue consuming requests after the UI has received
   // a timeout. The old Promise.race left the LangGraph loop alive in the
@@ -117,7 +124,7 @@ export async function runBuilderAgent({
   const builderTools = tools
     .filter((tool) =>
       !['get_context', 'list_directory', 'save_context'].includes(tool.name) &&
-      !((bedrockFastPath || initialWritePath) && READ_TOOLS.has(tool.name))
+      !((bedrockFastPath || strictInitialWritePath) && READ_TOOLS.has(tool.name))
     )
     .map((tool) => new Proxy(tool, {
       get(target, property) {
@@ -160,6 +167,14 @@ export async function runBuilderAgent({
             console.warn(`[BuilderAgent] ${target.name} rejected: ${toolResult.slice(0, 300)}`);
           }
           if (WRITE_TOOLS.has(target.name) && !writeFailed) {
+            const changedPaths = target.name === 'write_multiple_files'
+              ? (Array.isArray(input?.files) ? input.files.map((file) => file?.path) : [])
+              : target.name === 'edit_files'
+                ? (Array.isArray(input?.edits) ? input.edits.map((edit) => edit?.path) : [])
+                : [input?.path];
+            for (const filePath of changedPaths) {
+              if (typeof filePath === 'string' && filePath.startsWith('src/')) writtenPaths.add(filePath.replace(/^\/+/, ''));
+            }
             writeCalls += 1;
             wroteFiles = true;
           }
@@ -179,7 +194,7 @@ ${compactFallback
 ${incremental
   ? '\nINCREMENTAL UPDATE MODE: This is an existing project. First read the relevant files, then change only what the newest request requires. Preserve the existing visual design, working interactions, routes, and unrelated components. Do not replace the application with a new minimal page or scaffold.'
   : ''}
-${(bedrockFastPath || initialWritePath)
+${(bedrockFastPath || strictInitialWritePath)
   ? '\nFRESH BUILD MODE: Do not inspect starter files. Immediately write the planned implementation. Use more than one write call if needed to finish complete files; never truncate code.'
   : ''}
 
@@ -195,9 +210,9 @@ ${userMessage}`;
     // object. For a new app use a strict file-envelope response and perform
     // the one atomic sandbox write ourselves. Follow-ups still use normal
     // editing tools.
-    const useBedrockFileProtocol = initialWritePath
+    const useBedrockFileProtocol = strictInitialWritePath
       && modelOptions.provider === 'bedrock'
-      && ['qwen.qwen3-coder-next', 'deepseek.v3.2'].includes(modelOptions.model);
+      && modelOptions.model === 'qwen.qwen3-coder-next';
     if (useBedrockFileProtocol) {
       const generated = await runReActAgent({
         systemPrompt: QWEN_FILE_PROTOCOL,
@@ -267,7 +282,7 @@ ${userMessage}`;
       // Bedrock Mantle Grok honours the standard OpenAI "required" mode
       // more reliably than a forced named function. In the fresh/repair
       // paths it only sees write tools, so required still means a file write.
-      toolChoice: repair || forceWriteTool || initialWritePath || (modelOptions.provider === 'bedrock' && !incremental)
+      toolChoice: repair || forceWriteTool || strictInitialWritePath || (modelOptions.provider === 'bedrock' && modelOptions.model === 'qwen.qwen3-coder-next' && !incremental)
         ? (grokMantle ? 'required' : 'write_multiple_files')
         : undefined,
       // Only compact recovery is intentionally single-write. Full Qwen builds
@@ -276,7 +291,7 @@ ${userMessage}`;
       // not let it enter a second tool loop and overwrite that valid result
       // with a partial rewrite. If it creates individual files instead, it
       // still receives the normal fresh-build budget.
-      stopAfterTool: initialWritePath && modelOptions.provider === 'bedrock'
+      stopAfterTool: strictInitialWritePath && modelOptions.provider === 'bedrock'
         ? ['write_multiple_files']
         : incremental
           ? [...WRITE_TOOLS]
@@ -286,13 +301,50 @@ ${userMessage}`;
       // Do not spend the full 120-second builder window when native Bedrock
       // Qwen sends a named write tool with no `files` payload. The worker
       // immediately switches to its compact recovery writer in that case.
-      abortOnMalformedWrite: initialWritePath && modelOptions.provider === 'bedrock',
+      abortOnMalformedWrite: strictInitialWritePath && modelOptions.provider === 'bedrock',
       // The worker already emits the real tool results. Suppress LangGraph's
       // internal node/thought events so they do not create noisy DB writes.
       emit: () => {},
       signal: controller.signal,
       onUsage,
     });
+    // DeepSeek occasionally stops after making Home.jsx look complete, even
+    // when the approved plan explicitly calls for extracted components. The
+    // UI may build, but future edits become brittle and the project loses the
+    // structure promised to the user. Make one focused write-only completion
+    // pass for those omitted planned files.
+    const plannedStructurePaths = initialBuild && !compactFallback
+      ? [...new Set((Array.isArray(plan?.files) ? plan.files : [])
+        .map((file) => String(file?.path ?? '').replace(/^\/+/, ''))
+        .filter((filePath) => /^src\/(?:components|data)\/.+\.(?:jsx?|css)$/i.test(filePath)))]
+      : [];
+    const missingStructurePaths = plannedStructurePaths.filter((filePath) => !writtenPaths.has(filePath));
+    if (wroteFiles && missingStructurePaths.length > 0) {
+      console.warn(`[BuilderAgent] Completing planned structured files: ${missingStructurePaths.join(', ')}`);
+      try {
+        readCalls = 0;
+        await runReActAgent({
+          systemPrompt: BUILDER_SYSTEM,
+          userPrompt: `The root page was written, but these required plan files are still missing: ${missingStructurePaths.join(', ')}. First read src/pages/Home.jsx once. Then extract matching reusable UI/data into those paths AND update src/pages/Home.jsx to import and use them, without changing the visible result. Do not create any other path.`,
+          tools: builderTools.filter((tool) => READ_TOOLS.has(tool.name) || WRITE_TOOLS.has(tool.name)),
+          emit: () => {},
+          chatId,
+          temperature: 0.1,
+          maxTokens: 6144,
+          maxSteps: 4,
+          modelType: 'builder',
+          agentName: 'builder',
+          modelOptions,
+          stopAfterTool: ['write_multiple_files', 'edit_files', 'create_file'],
+          signal: controller.signal,
+          onUsage,
+        });
+      } catch (completionError) {
+        // The root app was successfully written. Verification can still
+        // proceed if a provider refuses the non-essential extraction pass.
+        console.warn(`[BuilderAgent] Structured completion skipped: ${String(completionError?.message ?? completionError).slice(0, 220)}`);
+      }
+    }
     const compactSummary = (compactFallback || modelOptions.provider === 'bedrock') && wroteFiles
       ? 'Implemented the requested interface and wrote the project files.'
       : output;
