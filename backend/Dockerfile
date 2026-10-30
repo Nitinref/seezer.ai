@@ -22,7 +22,9 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
       --fetch-retry-maxtimeout=120000
 
 COPY src ./src
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "pnpm exec prisma migrate deploy && pnpm start"]
+CMD ["./docker-entrypoint.sh"]

@@ -52,6 +52,7 @@ export interface Message {
 
 export type PipelineStage =
   | "start"
+  | "model"
   | "sandbox"
   | "planning"
   | "agent"

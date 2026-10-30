@@ -9,7 +9,7 @@ import { useAuthStore } from "@/store/authStore";
 import type { Message, PipelineEvent } from "@/types";
 
 const STAGE_PROGRESS: Record<string, number> = {
-  start: 5, sandbox: 20, planning: 35,
+  start: 5, model: 8, sandbox: 20, planning: 35,
   building: 60, validating: 80, checking: 92,
   preview: 95, done: 100,
 };

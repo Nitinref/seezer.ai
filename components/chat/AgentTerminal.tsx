@@ -87,6 +87,15 @@ function toActivity(event: PipelineEvent): Activity | null {
     };
   }
 
+  if (event.stage === "model") {
+    return {
+      event,
+      title: "Build models selected",
+      detail: cleanMessage(message),
+      kind: "thought",
+    };
+  }
+
   if (event.stage === "planning") {
     const plan =
       event.plan && typeof event.plan === "object"
