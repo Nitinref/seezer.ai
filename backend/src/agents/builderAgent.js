@@ -5,6 +5,37 @@ const WRITE_TOOLS = new Set(['create_file', 'delete_file', 'edit_files', 'write_
 const READ_TOOLS = new Set(['read_file', 'read_multiple_files']);
 const BUILDER_MAX_READ_CALLS = 1;
 
+const QWEN_FILE_PROTOCOL = `You are generating a complete Vite React implementation.
+Return source files only, using this exact format for every file:
+<file path="src/example.jsx">
+file contents
+</file>
+
+Do not use Markdown fences, explanations, tool calls, or prose. Include every
+file required by the plan, including src/pages/Home.jsx, src/App.jsx when it is
+changed, src/index.css, and every imported component/data file. Never import a
+local file unless you also include that file in this response. The project
+already has React, React Router, Tailwind, lucide-react, and react-icons.
+
+Router contract: src/main.jsx owns the ONE BrowserRouter around App. App.jsx
+may use Routes and Route but must never render BrowserRouter, HashRouter, or
+MemoryRouter. Do not create a second router provider.
+
+`;
+
+function parseGeneratedFiles(output) {
+  const files = [];
+  const matcher = /<file\s+path=["']([^"']+)["']\s*>\s*\n?([\s\S]*?)<\/file>/gi;
+  for (const match of String(output || '').matchAll(matcher)) {
+    const path = match[1].trim().replace(/^\/+/, '');
+    const content = match[2]
+      .replace(/^```(?:jsx?|tsx?|css|javascript|typescript)?\s*\n?/i, '')
+      .replace(/\n?```\s*$/, '');
+    if (path.startsWith('src/') && content.trim()) files.push({ path, content });
+  }
+  return files;
+}
+
 const BUILDER_SYSTEM = `You are the coding agent for an existing React application in /app.
 
 Your task is to implement the user's request using the validated build plan and the available project tools.
@@ -40,8 +71,8 @@ Rules:
 - Do not call get_context or list_directory. The project context and validated plan are already provided.
 - If necessary, inspect the relevant source files in one read_multiple_files call. Do not repeatedly inspect files.
 - Start writing or editing project files immediately after that inspection, or immediately if the plan is sufficient.
-- For a new page/app, use ONE compact write_multiple_files call. Keep the implementation focused and self-contained; do not split a simple UI into unnecessary components, data files, hooks, or pages.
-- Keep each initial implementation compact and self-contained. A working single-page app is better than a large architecture that cannot fit in one reliable tool call.
+- For a new page/app, the FIRST write must include the runnable entry files: src/pages/Home.jsx (the starter root route), src/App.jsx when needed, and src/index.css. Put the complete visible UI in those files first, then add extracted components/data in later writes. A build that creates only components while leaving the starter Home.jsx/App.jsx is incomplete and unacceptable.
+- Prefer write_multiple_files, but use another write call for remaining planned files when one payload would truncate code. Never omit a planned component, import, route, or the root app merely to fit one response.
 - Use edit_files only for a small focused change to existing files.
 - Do not install dependencies unless the plan requires a package that is not already listed in package.json.
 - Preserve existing app structure and imports; keep the root route working.
@@ -68,11 +99,13 @@ export async function runBuilderAgent({
   let readCalls = 0;
   let wroteFiles = false;
   let writeCalls = 0;
-  // Bedrock Qwen has high latency between ReAct turns. For normal builds,
-  // give it only the one atomic write path so it cannot spend a full model
-  // request reading and then another one deciding to write.
+  // A fresh build starts with a write, but it may need more than one write
+  // pass when a plan contains many components. The root files are deliberately
+  // prioritised in the prompt: native Bedrock Qwen may choose create_file
+  // calls even when a named tool choice was requested.
   const initialWritePath = initialBuild && !polish && !incremental;
   const bedrockFastPath = modelOptions.provider === 'bedrock' && !polish && !incremental;
+  const grokMantle = modelOptions.provider === 'bedrock' && modelOptions.model === 'xai.grok-4.3';
   // Never let an agent continue consuming requests after the UI has received
   // a timeout. The old Promise.race left the LangGraph loop alive in the
   // background, which quickly exhausted free-tier Gemini quota.
@@ -106,12 +139,27 @@ export async function runBuilderAgent({
           }
 
           const result = await Reflect.apply(invoke, target, [input, ...args]);
-          if (WRITE_TOOLS.has(target.name) && String(result).startsWith('Tool error:')) {
+          const toolResult = String(result ?? '');
+          let writeSucceeded = false;
+          try {
+            const parsed = JSON.parse(toolResult);
+            writeSucceeded = parsed?.ok === true || parsed?.success === true
+              || (Array.isArray(parsed?.results) && parsed.results.length > 0 && parsed.results.every((item) => item?.success !== false));
+          } catch {
+            // ToolNode may turn a thrown tool error into plain text.
+            writeSucceeded = !/(?:tool error|\berror:|edit_files:|create_file:|write_multiple_files:|delete_file:)/i.test(toolResult);
+          }
+          // Sandbox tools may return either "Tool error: …" or a raw
+          // operation error such as "edit_files: old_string not found".
+          // Neither is a source write; counting it as one prevented the
+          // worker from entering its write-only repair pass.
+          const writeFailed = !writeSucceeded;
+          if (WRITE_TOOLS.has(target.name) && writeFailed) {
             // Keep provider/tool failures observable without logging model
             // source payloads or entire generated files.
-            console.warn(`[BuilderAgent] ${target.name} rejected: ${String(result).slice(0, 300)}`);
+            console.warn(`[BuilderAgent] ${target.name} rejected: ${toolResult.slice(0, 300)}`);
           }
-          if (WRITE_TOOLS.has(target.name) && !String(result).startsWith('Tool error:')) {
+          if (WRITE_TOOLS.has(target.name) && !writeFailed) {
             writeCalls += 1;
             wroteFiles = true;
           }
@@ -126,13 +174,13 @@ export async function runBuilderAgent({
     ? 'The previous attempt did not write any project files. Immediately write the complete implementation; do not inspect files or explain first.'
     : 'Implement the validated plan now. Inspect relevant files at most once, then write the implementation.'}
 ${compactFallback
-  ? '\nRECOVERY MODE: Write a complete, working UI in exactly one write_multiple_files call using only src/App.jsx and src/index.css. Do not create components, hooks, pages, data, or utility files. Keep it self-contained so the tool arguments are never truncated.'
+  ? '\nRECOVERY MODE: The primary builder may have written NOTHING. Write a complete, working UI in exactly one write_multiple_files call using only src/pages/Home.jsx and src/index.css. The starter App.jsx already routes to Home; do not leave its "Ready to build" placeholder active. Home.jsx MUST be fully self-contained: do not import ../components, ./components, data files, hooks, assets, or any local project file, and do not render an identifier that is not declared inside Home.jsx. Do not create components, hooks, pages, data, or utility files. Keep it compact so the tool arguments are never truncated.'
   : ''}
 ${incremental
   ? '\nINCREMENTAL UPDATE MODE: This is an existing project. First read the relevant files, then change only what the newest request requires. Preserve the existing visual design, working interactions, routes, and unrelated components. Do not replace the application with a new minimal page or scaffold.'
   : ''}
 ${(bedrockFastPath || initialWritePath)
-  ? '\nFAST BEDROCK MODE: Do not inspect files. Immediately make exactly one write_multiple_files call containing every complete file required by the validated plan. Then stop. Do not call any other tool or provide a preamble.'
+  ? '\nFRESH BUILD MODE: Do not inspect starter files. Immediately write the planned implementation. Use more than one write call if needed to finish complete files; never truncate code.'
   : ''}
 
 Validated build plan:
@@ -143,6 +191,42 @@ ${userMessage}`;
 
   const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
   try {
+    // Native Bedrock coder models can emit a tool name with an empty argument
+    // object. For a new app use a strict file-envelope response and perform
+    // the one atomic sandbox write ourselves. Follow-ups still use normal
+    // editing tools.
+    const useBedrockFileProtocol = initialWritePath
+      && modelOptions.provider === 'bedrock'
+      && ['qwen.qwen3-coder-next', 'deepseek.v3.2'].includes(modelOptions.model);
+    if (useBedrockFileProtocol) {
+      const generated = await runReActAgent({
+        systemPrompt: QWEN_FILE_PROTOCOL,
+        userPrompt,
+        tools: [],
+        emit: () => {},
+        chatId,
+        temperature: 0.2,
+        maxTokens: modelOptions.model === 'deepseek.v3.2' ? 4096 : 8192,
+        maxSteps: 1,
+        modelType: 'builder',
+        agentName: 'builder',
+        modelOptions,
+        signal: controller.signal,
+        onUsage,
+      });
+      const files = parseGeneratedFiles(generated);
+      const hasRoot = files.some((file) => file.path === 'src/pages/Home.jsx' || file.path === 'src/App.jsx');
+      if (!hasRoot || files.length < 2) {
+        console.warn(`[BuilderAgent] Incomplete file envelope: chars=${String(generated || '').length} files=${files.length} paths=${files.map((file) => file.path).join(',') || 'none'}`);
+        throw new Error('Bedrock builder returned an incomplete file-envelope response.');
+      }
+      const writer = builderTools.find((tool) => tool.name === 'write_multiple_files');
+      if (!writer) throw new Error('write_multiple_files tool is unavailable.');
+      await writer.invoke({ files });
+      if (!wroteFiles) throw new Error('Bedrock file-envelope write was rejected by the sandbox.');
+      return { output: 'Implemented the requested interface and wrote the project files.', wroteFiles: true };
+    }
+
     const output = await runReActAgent({
       systemPrompt: BUILDER_SYSTEM,
       userPrompt,
@@ -156,13 +240,19 @@ ${userMessage}`;
       // 2–4K output tokens can cut the JSON tool arguments mid-file, which
       // LangChain reports as an invalid/truncated tool call. Give only this
       // write-first path enough room to finish its single atomic write.
-      // Most Vite apps fit comfortably in this budget. Keeping the initial
-      // one-shot Bedrock response bounded avoids multi-minute generations;
-      // compiler repair handles the rare invalid output afterward.
-      maxTokens: compactFallback ? 8192 : bedrockFastPath ? 6144 : repair ? 4096 : polish ? 4096 : 4096,
-      // Implement and polish each get an intentional inspect/write/complete
-      // budget instead of an open-ended ReAct loop.
-      maxSteps: repair || incremental ? 2 : 3,
+      // Component-heavy apps do not fit reliably in a 6K atomic tool JSON.
+      // Groq's free Qwen tier rejects requests whose declared output ceiling
+      // exceeds its 1K OTPM allowance. Recovery writes are deliberately just
+      // Home.jsx + index.css, so keep that emergency path under the limit.
+      maxTokens: compactFallback
+        ? (modelOptions.provider === 'groq' ? 900 : 8192)
+        : bedrockFastPath ? 8192 : repair ? 6144 : polish ? 4096 : 6144,
+      // A fresh app can use multiple write passes; edits remain focused.
+      // Qwen may emit one create_file call per turn. Four turns allowed it to
+      // produce isolated components then hit the cap before App.jsx, leaving
+      // the starter "Ready to build" screen in preview. Give fresh builds a
+      // realistic tool budget; incremental edits stay constrained.
+      maxSteps: repair || incremental ? 2 : 8,
       modelType: 'builder',
       agentName: 'builder',
       modelOptions,
@@ -174,20 +264,29 @@ ${userMessage}`;
       // Bedrock Qwen is fast when it sends the whole project as one atomic
       // write, but can otherwise create files one at a time. Pin the tool so
       // new builds need one request and one tool execution, not a slow chain.
+      // Bedrock Mantle Grok honours the standard OpenAI "required" mode
+      // more reliably than a forced named function. In the fresh/repair
+      // paths it only sees write tools, so required still means a file write.
       toolChoice: repair || forceWriteTool || initialWritePath || (modelOptions.provider === 'bedrock' && !incremental)
-        ? 'write_multiple_files'
+        ? (grokMantle ? 'required' : 'write_multiple_files')
         : undefined,
-      // Qwen Coder writes the full app atomically but can then leave a slow
-      // follow-up turn open only to narrate a summary. Let it inspect first,
-      // but terminate immediately after the first successful file write.
-      // Compact recovery still stops after its mandatory one tool call.
-      stopAfterTool: incremental
-        ? [...WRITE_TOOLS]
-        : compactFallback && forceWriteTool
-        ? true
-        : (modelOptions.provider === 'bedrock' || initialWritePath) && !incremental
+      // Only compact recovery is intentionally single-write. Full Qwen builds
+      // may need a second write to finish all planned components.
+      // Once Bedrock Qwen has produced its initial atomic project write, do
+      // not let it enter a second tool loop and overwrite that valid result
+      // with a partial rewrite. If it creates individual files instead, it
+      // still receives the normal fresh-build budget.
+      stopAfterTool: initialWritePath && modelOptions.provider === 'bedrock'
+        ? ['write_multiple_files']
+        : incremental
           ? [...WRITE_TOOLS]
-          : false,
+          : compactFallback && forceWriteTool
+            ? true
+            : false,
+      // Do not spend the full 120-second builder window when native Bedrock
+      // Qwen sends a named write tool with no `files` payload. The worker
+      // immediately switches to its compact recovery writer in that case.
+      abortOnMalformedWrite: initialWritePath && modelOptions.provider === 'bedrock',
       // The worker already emits the real tool results. Suppress LangGraph's
       // internal node/thought events so they do not create noisy DB writes.
       emit: () => {},
@@ -219,7 +318,10 @@ ${userMessage}`;
     // calls until LangGraph reaches its cap. Let the worker use its existing
     // forced write-only recovery pass instead of failing the entire job or
     // raising the cap and spending even more model turns.
-    if (!wroteFiles && /recursion limit/i.test(String(error?.message ?? error))) {
+    if (/recursion limit/i.test(String(error?.message ?? error))) {
+      if (wroteFiles) {
+        return { output: 'Implementation files were written before the builder reached its tool-turn budget; continuing with verification.', wroteFiles: true };
+      }
       return { output: 'Builder reached its tool-turn budget before writing files.', wroteFiles: false };
     }
     throw error;

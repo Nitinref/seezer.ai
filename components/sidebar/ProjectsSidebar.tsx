@@ -1,14 +1,20 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Folder,
+  ChevronRight,
   LayoutGrid,
+  Laptop,
   Loader2,
   LogOut,
+  MessageCirclePlus,
+  Moon,
   PanelLeftClose,
   Plus,
   Search,
+  Settings,
+  Sun,
   Trash2,
 } from "lucide-react";
 import { useProjects } from "@/hooks/useProjects";
@@ -17,6 +23,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import type { Project } from "@/types";
 import { SizzerLogo } from "@/components/brand/SizzerLogo";
+import { creditsApi } from "@/lib/api";
 
 interface ProjectsSidebarProps {
   open: boolean;
@@ -35,6 +42,58 @@ export function ProjectsSidebar({
   const { projects, isLoading, deleteMutation } = useProjects();
   const { activeProject, setActiveProject } = useAppStore();
   const { user, logout } = useAuth();
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [theme, setTheme] = useState<"system" | "light" | "dark">(() => {
+    const saved = typeof window === "undefined" ? null : window.localStorage.getItem("sizzer.theme");
+    return saved === "system" || saved === "light" || saved === "dark" ? saved : "dark";
+  });
+  const [creditBalance, setCreditBalance] = useState(0);
+  const [unlimitedCredits, setUnlimitedCredits] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const loadBalance = async () => {
+      try {
+        const credits = await creditsApi.balance();
+        setUnlimitedCredits(credits.unlimited);
+        if (credits.balanceUsd !== null) setCreditBalance(Number(credits.balanceUsd) || 0);
+      } catch {
+        // Keep the menu usable when the balance endpoint is unavailable.
+      }
+    };
+    void loadBalance();
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "system") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", theme);
+    root.classList.toggle("workspace-light", theme === "light");
+  }, [theme]);
+
+  useEffect(() => {
+    const closeMenu = (event: MouseEvent) => {
+      if (!accountMenuRef.current?.contains(event.target as Node)) setAccountMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAccountMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  const selectTheme = (nextTheme: "system" | "light" | "dark") => {
+    const root = document.documentElement;
+    if (nextTheme === "system") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", nextTheme);
+    root.classList.toggle("workspace-light", nextTheme === "light");
+    setTheme(nextTheme);
+    window.localStorage.setItem("sizzer.theme", nextTheme);
+  };
 
   const filteredProjects = useMemo(() => {
     if (!search.trim()) return projects;
@@ -179,25 +238,35 @@ export function ProjectsSidebar({
           </button>
         )}
 
-        <div className="flex items-center gap-2.5 border-t border-white/[0.06] pt-2.5">
-          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 text-xs font-bold text-white shadow-sm">
-            {(user?.name ?? user?.email ?? "U").slice(0, 1).toUpperCase()}
-          </div>
-          <div className="min-w-0 flex-1 truncate">
-            <p className="truncate text-[12px] font-medium text-zinc-200">
-              {user?.name ?? "Sizzer User"}
-            </p>
-            <p className="truncate text-[10.5px] text-zinc-400">
-              {user?.email}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => logout()}
-            title="Sign out"
-            className="grid h-6 w-6 shrink-0 place-items-center rounded text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
-          >
-            <LogOut size={13} />
+        <div ref={accountMenuRef} className="relative border-t border-white/[0.06] pt-2.5">
+          {accountMenuOpen && (
+            <div role="dialog" aria-label="Account menu" className="absolute bottom-[calc(100%+10px)] left-0 z-[60] w-full overflow-hidden rounded-xl border border-white/15 bg-[#0a0a0c] py-1.5 shadow-[0_16px_45px_rgba(0,0,0,0.65)]">
+              <div className="flex items-center gap-2.5 px-3 pb-3 pt-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-semibold text-white">{user?.name ?? "Sizzer User"}</p>
+                  <p className="truncate text-[10.5px] text-zinc-500">{user?.email ?? "Signed in account"}</p>
+                </div>
+                <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-br from-rose-300 via-orange-300 to-violet-600 text-[10px] font-bold text-white">{(user?.name ?? user?.email ?? "U").slice(0, 1).toUpperCase()}</div>
+              </div>
+              <div className="border-t border-white/10" />
+              <div className="space-y-0.5 p-1.5 text-[12px]">
+                <button type="button" className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08]"><span>Settings</span><Settings size={16} className="text-zinc-500" /></button>
+                <button type="button" className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08]"><span>Credit</span><span className="text-zinc-500">{unlimitedCredits ? "Unlimited" : creditBalance.toFixed(2)}</span></button>
+              </div>
+              <div className="border-t border-white/10" />
+              <div className="space-y-0.5 p-1.5 text-[12px]">
+                <button type="button" className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08]"><span>Feedback</span><MessageCirclePlus size={16} className="text-zinc-500" /></button>
+                <div className="flex items-center justify-between px-2.5 py-2 text-zinc-200"><span>Theme</span><div className="flex rounded-lg border border-white/15 bg-black p-0.5">{([["system", Laptop, "System"], ["light", Sun, "Light"], ["dark", Moon, "Dark"]] as const).map(([value, Icon, label]) => <button key={value} type="button" title={label} aria-label={label} onClick={() => selectTheme(value)} className={`grid h-5.5 w-5.5 place-items-center rounded-md ${theme === value ? "bg-white/15 text-white" : "text-zinc-500 hover:text-white"}`}><Icon size={13} /></button>)}</div></div>
+                <button type="button" className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08]"><span>More</span><ChevronRight size={16} className="text-zinc-500" /></button>
+              </div>
+              <div className="border-t border-white/10" />
+              <div className="p-1.5"><button type="button" onClick={logout} className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-zinc-200 hover:bg-white/[0.08]"><span>Sign Out</span><LogOut size={16} className="text-zinc-500" /></button></div>
+            </div>
+          )}
+          <button type="button" onClick={() => setAccountMenuOpen((current) => !current)} aria-expanded={accountMenuOpen} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-white/[0.05]">
+            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 text-xs font-bold text-white shadow-sm">{(user?.name ?? user?.email ?? "U").slice(0, 1).toUpperCase()}</div>
+            <div className="min-w-0 flex-1 truncate"><p className="truncate text-[12px] font-medium text-zinc-200">{user?.name ?? "Sizzer User"}</p><p className="truncate text-[10.5px] text-zinc-400">{user?.email}</p></div>
+            <LogOut size={13} className="shrink-0 text-zinc-500" />
           </button>
         </div>
       </div>

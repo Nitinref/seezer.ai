@@ -313,6 +313,52 @@ main.landing-page > section:last-child > div:nth-child(4) {
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.551 0.027 264.364);
 }
+
+/* Workspace light theme. Most of the builder uses deliberate dark surface
+   utilities, so the scoped overrides keep the change contained to the app
+   workspace rather than affecting the public landing and auth pages. */
+:is(html[data-theme="light"], html.workspace-light) {
+  color-scheme: light;
+}
+
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme {
+  background: #f3f5f8 !important;
+  color: #172033 !important;
+}
+
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme [class*="bg-[#"],
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme [class*="bg-black"] {
+  background-color: #ffffff !important;
+}
+
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme [class*="bg-white/"] {
+  background-color: rgb(15 23 42 / 0.045) !important;
+}
+
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme [class*="border-white"] {
+  border-color: rgb(15 23 42 / 0.13) !important;
+}
+
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme .text-white,
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme [class*="text-white/"] {
+  color: #172033 !important;
+}
+
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme .bg-sky-500,
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme .bg-sky-400 {
+  color: white !important;
+}
+
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme [class*="text-zinc-"],
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme [class*="text-white/"] {
+  color: #526075 !important;
+}
+
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme input,
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme textarea,
+:is(html[data-theme="light"], html.workspace-light) .workspace-theme select {
+  color: #172033 !important;
+}
 @theme inline {
   --animate-spotlight: spotlight 2s ease 0.75s 1 forwards;
 }

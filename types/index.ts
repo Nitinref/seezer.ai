@@ -6,6 +6,7 @@ export interface User {
   name: string | null;
   createdAt: string;
   creditBalanceUsd: number;
+  unlimitedCredits?: boolean;
 }
 
 export interface AuthResponse {

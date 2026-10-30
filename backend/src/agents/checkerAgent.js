@@ -16,7 +16,9 @@ export async function runCheckerAgent({ tools, timeoutMs = CHECKER_TIMEOUT_MS,em
             userPrompt: 'Run the build, fix any compilation errors, then run ESLint.',
             tools,
             temperature: 0.1,
-            maxTokens: 1024,
+            // Keep under Groq's 1,000 OTPM request ceiling after tool-schema
+            // overhead. The checker only needs a compact fix/result message.
+            maxTokens: 512,
             maxSteps: 5,
             emit,
             chatId,

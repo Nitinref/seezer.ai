@@ -393,7 +393,16 @@ export function makeSandboxTools(projectId) {
           // the entire BullMQ job.
           return JSON.stringify({
             success: false,
-            build: { exitCode: null, stdout: '', stderr: '', error: error?.message ?? String(error) },
+            // The E2B command client can throw on a non-zero process instead
+            // of returning its result. Preserve compiler stdout/stderr so the
+            // repair builder receives the file, line, and parse error rather
+            // than the useless generic "exit status 1" message.
+            build: {
+              exitCode: error?.exitCode ?? error?.code ?? null,
+              stdout: error?.stdout ?? error?.result?.stdout ?? '',
+              stderr: error?.stderr ?? error?.result?.stderr ?? '',
+              error: error?.message ?? String(error),
+            },
             lint: { skipped: true, exitCode: null, stdout: '', stderr: '' },
           });
         }

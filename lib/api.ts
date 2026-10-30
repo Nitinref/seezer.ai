@@ -44,7 +44,7 @@ export const authApi = {
 
 export const creditsApi = {
   balance: () =>
-    apiClient.get<{ balanceUsd: number }>("/auth/credits").then((r) => r.data.balanceUsd),
+    apiClient.get<{ balanceUsd: number | null; unlimited: boolean }>("/auth/credits").then((r) => r.data),
 };
 
 export const projectsApi = {

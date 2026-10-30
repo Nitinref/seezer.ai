@@ -36,6 +36,7 @@ export function AppShell({
   const [previewWidth, setPreviewWidth] = useState(70);
   const [mobilePanel, setMobilePanel] = useState<"chat" | "preview">("chat");
   const [creditBalance, setCreditBalance] = useState(2);
+  const [unlimitedCredits, setUnlimitedCredits] = useState(false);
   const dragging = useRef(false);
   const { activeProject, activeTab, setActiveTab, setPreviewUrl } = useAppStore();
   const restoredPreviewProjects = useRef(new Set<string>());
@@ -78,8 +79,11 @@ export function AppShell({
     let active = true;
     const refreshBalance = async () => {
       try {
-        const balance = await creditsApi.balance();
-        if (active) setCreditBalance(asCreditBalance(balance));
+        const credits = await creditsApi.balance();
+        if (active) {
+          setUnlimitedCredits(credits.unlimited);
+          if (!credits.unlimited) setCreditBalance(asCreditBalance(credits.balanceUsd));
+        }
       } catch {
         // Keep the initial grant visible if the API has not restarted yet.
       }
@@ -113,7 +117,7 @@ export function AppShell({
   };
 
   return (
-    <div className="flex h-screen w-full max-w-full overflow-hidden bg-[#151515] text-white">
+    <div className="workspace-theme flex h-screen w-full max-w-full overflow-hidden bg-[#151515] text-white">
       {/* Collapsible Projects Sidebar to the left of Chat */}
       <ProjectsSidebar
         open={sidebarOpen}
@@ -155,8 +159,8 @@ export function AppShell({
             >
               <Globe2 size={17} className="text-white/70" /> Preview
             </button>
-            <span title="Remaining AI credit" className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] font-semibold tabular-nums ${creditBalance <= 0 ? "border-rose-400/30 bg-rose-400/10 text-rose-200" : "border-emerald-400/20 bg-emerald-400/[.08] text-emerald-200"}`}>
-              <WalletCards size={15} /> ${creditBalance.toFixed(4)}
+            <span title={unlimitedCredits ? "Unlimited AI credits" : "Remaining AI credit"} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] font-semibold tabular-nums ${unlimitedCredits || creditBalance > 0 ? "border-emerald-400/20 bg-emerald-400/[.08] text-emerald-200" : "border-rose-400/30 bg-rose-400/10 text-rose-200"}`}>
+              <WalletCards size={15} /> {unlimitedCredits ? "Unlimited" : `$${creditBalance.toFixed(4)}`}
             </span>
             <button
               onClick={() => setActiveTab("code")}

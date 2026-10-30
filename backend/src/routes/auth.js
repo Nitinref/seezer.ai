@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import prisma from '../db/index.js';
 import { signToken, authenticate } from '../middleware/auth.js';
+import { isUnlimitedAdmin } from '../services/credits.js';
 
 const router = Router();
 
@@ -9,6 +10,7 @@ function serializeUser(user) {
   return {
     ...user,
     creditBalanceUsd: Number(user.creditBalanceUsd ?? 0),
+    unlimitedCredits: isUnlimitedAdmin(user),
   };
 }
 
@@ -88,10 +90,10 @@ router.get('/credits', authenticate, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { creditBalanceUsd: true },
+      select: { email: true, creditBalanceUsd: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    return res.json({ balanceUsd: Number(user.creditBalanceUsd) });
+    return res.json({ balanceUsd: isUnlimitedAdmin(user) ? null : Number(user.creditBalanceUsd), unlimited: isUnlimitedAdmin(user) });
   } catch (err) {
     console.error('[auth/credits]', err);
     return res.status(500).json({ error: 'Unable to load credit balance' });

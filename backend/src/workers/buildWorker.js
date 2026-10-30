@@ -38,6 +38,10 @@ import { runCheckerAgent } from '../agents/checkerAgent.js';
 
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Deterministic Vite verification is more reliable (and far cheaper) than
+// sending a whole generated project through free-tier review agents. Enable
+// these only when a provider has sufficient token quota.
+const REVIEW_AGENTS_ENABLED = String(process.env.REVIEW_AGENTS_ENABLED || 'false').toLowerCase() === 'true';
 
 /**
  * Repair a very common generated-code error before opening the preview: a
@@ -89,6 +93,140 @@ async function repairResolvableRelativeImports(sb) {
   return fixes;
 }
 
+/**
+ * Vite can compile <Routes> successfully even if no Router wraps it; that
+ * failure appears only as a blank preview at runtime. Generated apps often
+ * replace App.jsx with Routes but forget the BrowserRouter supplied by the
+ * starter. Ensure exactly one provider across App.jsx and main.jsx.
+ */
+async function ensureRouterProvider(sb) {
+  const appPath = '/app/src/App.jsx';
+  const mainPath = '/app/src/main.jsx';
+  let appSource;
+  let mainSource;
+  try {
+    [appSource, mainSource] = await Promise.all([
+      sb.files.read(appPath),
+      sb.files.read(mainPath),
+    ]);
+  } catch {
+    return false;
+  }
+
+  const usesRoutes = /<Routes\b|\buseRoutes\s*\(/.test(String(appSource));
+  const hasRouter = /<(?:BrowserRouter|HashRouter|MemoryRouter)\b|\bcreateBrowserRouter\s*\(/;
+  const appHasRouter = hasRouter.test(String(appSource));
+  const mainHasRouter = hasRouter.test(String(mainSource));
+  if (!usesRoutes) return false;
+
+  // Generated projects sometimes preserve the starter App router and add a
+  // second BrowserRouter in main.jsx. Keep main.jsx as the single app shell
+  // and unwrap only App.jsx; its Routes continue to work under that provider.
+  if (appHasRouter && mainHasRouter) {
+    const unwrappedApp = String(appSource)
+      .replace(/<BrowserRouter(?:\s[^>]*)?>/g, '')
+      .replace(/<\/BrowserRouter>/g, '')
+      .replace(/<HashRouter(?:\s[^>]*)?>/g, '')
+      .replace(/<\/HashRouter>/g, '')
+      .replace(/<MemoryRouter(?:\s[^>]*)?>/g, '')
+      .replace(/<\/MemoryRouter>/g, '');
+    if (unwrappedApp !== appSource) {
+      await sb.files.write(appPath, unwrappedApp);
+      return true;
+    }
+  }
+
+  if (appHasRouter || mainHasRouter) return false;
+  if (!/<App\s*\/>/.test(String(mainSource))) return false;
+
+  const updated = `import { BrowserRouter as SeezerRouter } from 'react-router-dom';\n${mainSource}`
+    .replace(/<App\s*\/>/, '<SeezerRouter><App /></SeezerRouter>');
+  await sb.files.write(mainPath, updated);
+  return true;
+}
+
+/**
+ * Keep a small, human-readable project contract alongside generated source.
+ * Unlike chat-only memory, it is visible in the Code view, survives worker
+ * restarts, and gives future edits an accurate map of the current app.
+ */
+async function refreshProjectMemoryFile(sb, { buildStatus = 'in progress' } = {}) {
+  let packageJson = {};
+  try { packageJson = JSON.parse(await sb.files.read('/app/package.json')); } catch { }
+
+  let sourceFiles = [];
+  try {
+    const listing = await sb.commands.run(
+      "find src -type f \\( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' \\) -print",
+      { cwd: '/app', timeoutMs: 20_000 },
+    );
+    sourceFiles = String(listing.stdout || '')
+      .split(/\r?\n/)
+      .map((file) => file.trim().replace(/\\/g, '/'))
+      .filter(Boolean)
+      .sort();
+  } catch { }
+
+  const dependencies = { ...(packageJson.dependencies || {}), ...(packageJson.devDependencies || {}) };
+  const version = (name) => dependencies[name] || 'not installed';
+  const pages = sourceFiles.filter((file) => /(^|\/)pages\/[^/]+\.(?:jsx?|tsx?)$/.test(file));
+  const components = sourceFiles.filter((file) => /(^|\/)components\/[^/]+\.(?:jsx?|tsx?)$/.test(file));
+  const entry = sourceFiles.find((file) => /^src\/main\.(?:jsx?|tsx?)$/.test(file)) || 'src/main.jsx';
+  const app = sourceFiles.find((file) => /^src\/App\.(?:jsx?|tsx?)$/.test(file)) || 'src/App.jsx';
+  let entrySource = '';
+  let appSource = '';
+  try { entrySource = String(await sb.files.read(`/app/${entry}`)); } catch { }
+  try { appSource = String(await sb.files.read(`/app/${app}`)); } catch { }
+  const entryRouter = /<(?:BrowserRouter|HashRouter|MemoryRouter)\b/.test(entrySource);
+  const appRouter = /<(?:BrowserRouter|HashRouter|MemoryRouter)\b/.test(appSource);
+  const routeDeclarations = /<Routes\b|\buseRoutes\s*\(/.test(appSource);
+  const routerLocation = entryRouter && !appRouter
+    ? `\`${entry}\` (one provider; expected)`
+    : appRouter && !entryRouter
+      ? `\`${app}\` (legacy provider; preserve unless deliberately migrating)`
+      : entryRouter && appRouter
+        ? `INVALID: both \`${entry}\` and \`${app}\` contain a Router provider`
+        : 'none detected';
+
+  const markdown = `# Seezer project memory
+
+## Stack
+- React ${version('react')} with Vite ${version('vite')}
+- Styling: Tailwind CSS ${version('tailwindcss')}
+- Routing: react-router-dom ${version('react-router-dom')}
+- Icons: lucide-react ${version('lucide-react')}; react-icons ${version('react-icons')}
+
+## Layout
+- \`${entry}\`: client entry point
+- \`${app}\`: application shell and routes
+- \`src/pages/\`: route-level screens
+- \`src/components/\`: reusable UI
+- \`src/index.css\`: global styles
+- Router provider discovered: ${routerLocation}
+- Route declarations in App: ${routeDeclarations ? 'yes' : 'no'}
+
+## Agent rules
+- Treat follow-up requests as focused edits to the existing app; do not recreate unrelated UI.
+- Preserve working routes, imports, and interactions.
+- Prefer installed packages. lucide-react and react-icons are available for icons.
+- Use the existing Vite/React structure; do not replace configuration unless the request requires it.
+- Keep exactly one React Router provider. Follow the router location recorded above.
+
+## Current condition
+- Build status: ${buildStatus}
+- Pages: ${pages.length ? pages.map((file) => `\`${file}\``).join(', ') : 'none yet'}
+- Components: ${components.length ? components.map((file) => `\`${file}\``).join(', ') : 'none yet'}
+- Source files: ${sourceFiles.length}
+
+## Checks
+- The host runs \`npm run build\` and sends any compiler diagnostics to the repair builder.
+- A preview is published only after a verified build.
+`;
+
+  await sb.files.write('/app/.seezer/memory.md', markdown);
+  return markdown;
+}
+
 // Preserve the actionable compiler/linter output for a targeted builder
 // repair, without flooding the next model prompt with an entire build log.
 function buildFailureDiagnostics(verification) {
@@ -106,6 +244,21 @@ function buildFailureDiagnostics(verification) {
     .filter(Boolean)
     .join('\n\n');
   return details.slice(-6_000) || 'The build command failed without diagnostic output.';
+}
+
+// Vite reports the exact unresolved import, but a generated plan can omit the
+// matching dependency (for example `lucide-react`). Resolve only a normal npm
+// package name; relative paths are source errors and must go to the builder.
+function missingPackageFromDiagnostic(diagnostic = '') {
+  const match = String(diagnostic).match(/failed to resolve import\s+["']([^"']+)["']/i);
+  const specifier = match?.[1];
+  if (!specifier || specifier.startsWith('.') || specifier.startsWith('/') || specifier.includes(':')) return null;
+  const packageName = specifier.startsWith('@')
+    ? specifier.split('/').slice(0, 2).join('/')
+    : specifier.split('/')[0];
+  return /^(?:@[a-z0-9._-]+\/[a-z0-9._-]+|[a-z0-9][a-z0-9._-]*)$/i.test(packageName)
+    ? packageName
+    : null;
 }
 // Pipeline events do not otherwise carry the Bull job identifier. Retaining
 // it for the active run lets a reconnected client still expose a real Stop
@@ -184,7 +337,12 @@ function isRecoveryRequest(message = '') {
 }
 
 function isPreviewRequest(message = '') {
-  return /\b(?:show|give|open|provide|start|see)\b.*\b(?:preview|live preview)\b|\b(?:preview|live preview)\b/i.test(message);
+  // Only treat an explicit, standalone preview command as preview-only.
+  // A repair request such as "the preview is black, fix it" must reach the
+  // Builder; matching every sentence containing the word "preview" caused
+  // those requests to reopen the same broken iframe without changing code.
+  const text = String(message).trim().toLowerCase();
+  return /^(?:(?:show|give|open|provide|start|see)(?: me)? )?(?:the )?(?:live )?preview(?: please)?[.!?]*$/.test(text);
 }
 
 function isRetryableBuildFailure(error) {
@@ -254,7 +412,7 @@ async function emit(chatId, stage, message, extra = {}) {
 }
 
 async function scaffoldReactApp(sb, chatId, projectId) {
-  await emit(chatId, 'sandbox', 'Scaffolding React + Tailwind + React Icons…');
+  await emit(chatId, 'sandbox', 'Scaffolding React + Tailwind UI kit…');
 
   if (!sb?.files) throw new Error(`Sandbox files API not available. Keys: ${Object.keys(sb ?? {}).join(', ')}`);
 
@@ -263,7 +421,10 @@ async function scaffoldReactApp(sb, chatId, projectId) {
     scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
     dependencies: {
       react: '^18.2.0', 'react-dom': '^18.2.0',
-      'react-router-dom': '^6.8.0', 'react-icons': '^4.11.0',
+      'react-router-dom': '^6.8.0',
+      // Available in every new sandbox: generated UI can use icons without
+      // spending a later agent turn on an on-demand npm install.
+      'react-icons': '^4.11.0', 'lucide-react': '^0.468.0',
     },
     devDependencies: {
       '@vitejs/plugin-react': '^3.1.0', tailwindcss: '^3.2.0',
@@ -278,7 +439,7 @@ async function scaffoldReactApp(sb, chatId, projectId) {
     '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>React App</title></head>\n<body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>\n</html>\n');
 
   await sb.files.write('/app/src/main.jsx',
-    "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './index.css';\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);\n");
+    "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport { BrowserRouter } from 'react-router-dom';\nimport App from './App';\nimport './index.css';\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><BrowserRouter><App /></BrowserRouter></React.StrictMode>);\n");
 
   await sb.files.write('/app/tailwind.config.js',
     "export default { content: ['./index.html', './src/**/*.{js,jsx}'], theme: { extend: {} }, plugins: [] };\n");
@@ -291,7 +452,7 @@ async function scaffoldReactApp(sb, chatId, projectId) {
   await sb.files.write('/app/src/index.css', '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n');
 
   await sb.files.write('/app/src/App.jsx',
-    "import { BrowserRouter, Routes, Route } from 'react-router-dom';\nimport Home from './pages/Home';\nfunction App() { return <BrowserRouter><Routes><Route path=\"/\" element={<Home />} /></Routes></BrowserRouter>; }\nexport default App;\n");
+    "import { Routes, Route } from 'react-router-dom';\nimport Home from './pages/Home';\nfunction App() { return <Routes><Route path=\"/\" element={<Home />} /></Routes>; }\nexport default App;\n");
 
   await sb.files.write('/app/src/pages/Home.jsx',
     'export default function Home() { return <div className="min-h-screen flex items-center justify-center bg-gray-50"><h1 className="text-2xl font-bold text-gray-800">Ready to build…</h1></div>; }\n');
@@ -603,7 +764,7 @@ export default defineConfig({
 async function syncProjectFiles(sb, projectId, logger) {
   try {
     const allFiles = await collectSandboxFiles(sb, '/app/src');
-    const rootFiles = ['vite.config.js', 'index.html', 'package.json', 'tailwind.config.js', 'postcss.config.js'];
+    const rootFiles = ['vite.config.js', 'index.html', 'package.json', 'tailwind.config.js', 'postcss.config.js', '.seezer/memory.md'];
     for (const file of rootFiles) {
       try {
         const content = await sb.files.read(`/app/${file}`);
@@ -768,6 +929,18 @@ export default defineConfig({
 
     logger.endStage('sandbox');
 
+    // A builder can time out after creating support components but before it
+    // replaces the starter route. Such a project must be retried as a fresh
+    // build, not treated as a valid follow-up that preserves the placeholder.
+    let starterRouteStillPresent = false;
+    try {
+      const homeSource = await sb.files.read('/app/src/pages/Home.jsx');
+      starterRouteStillPresent = /Ready to build(?:…|\.\.\.)/.test(homeSource);
+      if (starterRouteStillPresent) {
+        await emit(chatId, 'sandbox', 'Starter route is still active; completing the initial implementation.');
+      }
+    } catch { }
+
 
     const sandboxTools = makeSandboxTools(projectId);
     const lcTools = toLangChainTools(sandboxTools, emit, chatId, projectId);
@@ -820,15 +993,27 @@ export default defineConfig({
       })).map((file) => file.path);
     } catch { }
 
+    // The visible project memory is generated only after a build has produced
+    // real source. On follow-ups, inject its compact contract directly into
+    // the prompt so the builder does not waste its one allowed read call just
+    // discovering project structure.
+    let projectMemory = '';
+    try {
+      projectMemory = String(await sb.files.read('/app/.seezer/memory.md')).slice(0, 6_000);
+    } catch { }
+
     const trimmedHistory = previousMessages
       .filter((m) => ['user', 'assistant'].includes(m.role))
       .slice(-6)
       .map((m) => `${m.role.toUpperCase()}: ${m.content.slice(0, 200)}`)
       .join('\n');
 
-    // A prior user message alone does not mean a project exists. A first
-    // build can fail before any plan or source file was written.
-    const hasPriorProjectContext = Boolean(savedPlan) || projectFilePaths.length > 0;
+    // A prior user message alone does not mean a project exists. Also, the
+    // React starter scaffold is persisted immediately for the Code viewer;
+    // those nine default files must not make a brand-new build look like a
+    // continuation and cause the planner to be skipped.
+    const hasPriorProjectContext = !starterRouteStillPresent
+      && (Boolean(savedPlan) || (!needsScaffold && projectFilePaths.length > 0));
     const previousPlanBrief = savedPlan ? JSON.stringify({
       summary: savedPlan.summary,
       approach: savedPlan.approach,
@@ -836,7 +1021,7 @@ export default defineConfig({
       ui: savedPlan.ui,
     }) : '';
     const continuationContext = hasPriorProjectContext
-      ? `This is a follow-up to an existing project. Preserve the current implementation and make an incremental change; do not recreate the app from scratch.\nPersisted project files: ${projectFilePaths.join(', ') || '(files will be inspected in the sandbox)'}${previousPlanBrief ? `\nPrevious build brief: ${previousPlanBrief}` : ''}`
+      ? `This is a follow-up to an existing project. Preserve the current implementation and make an incremental change; do not recreate the app from scratch.\nPersisted project files: ${projectFilePaths.join(', ') || '(files will be inspected in the sandbox)'}${previousPlanBrief ? `\nPrevious build brief: ${previousPlanBrief}` : ''}${projectMemory ? `\n\nProject memory:\n${projectMemory}` : ''}`
       : '';
     const memories = await getBuildMemory({
       userId: chatOwner.userId,
@@ -867,6 +1052,13 @@ export default defineConfig({
       }
 
       await emit(chatId, 'checking', 'Checking the existing files before opening the preview…');
+      try {
+        if (await ensureRouterProvider(sb)) {
+          await emit(chatId, 'checking', 'Repaired React Router provider structure.');
+        }
+      } catch (error) {
+        logger._log('warn', 'Router provider repair skipped for preview', { error: error?.message ?? String(error) });
+      }
       const checkRaw = await toolMap.verify_project.execute({});
       await emit(chatId, 'tool', JSON.stringify({
         ...publicToolDetails('verify_project', checkRaw), args: {},
@@ -943,7 +1135,10 @@ export default defineConfig({
       buildFailed = false;
       const isReplan = replanCount > 0;
 
-      const resumePlanner = (hasCheckpoint('planned') || resumeFailedBuild || continueExistingProject) && !isReplan;
+      // A compilation retry already has a validated plan and an exact error.
+      // Sending it back through Planner wastes quota and can replace the
+      // existing implementation instead of repairing the named failure.
+      const resumePlanner = hasCheckpoint('planned') || resumeFailedBuild || continueExistingProject || isReplan;
 
       // ── STEP 2: PlannerAgent ──────────────────────────────────────────
       if (!resumePlanner) {
@@ -1062,12 +1257,18 @@ export default defineConfig({
       // (Bedrock's one-turn write path) also apply to default builds.
       const builderModelOptions = builderRequestOptions.provider
         ? builderRequestOptions
-        : { provider: AGENT_PROVIDERS.builder };
+        : {
+          provider: AGENT_PROVIDERS.builder,
+          ...(AGENT_PROVIDERS.builder === 'bedrock' ? { model: BEDROCK_BUILDER_MODEL } : {}),
+        };
       const builderPrompt = isReplan && lastError?.diagnostic
         ? `${fullPrompt}\n\nTARGETED BUILD REPAIR:\nThe previous build failed with the diagnostic below. Inspect the files named by this error and fix this specific failure. Preserve the existing implementation; do not redesign or replace unrelated parts. After the fix, ensure all affected imports, exports, and references are consistent.\n\n${lastError.diagnostic}`
         : continueExistingProject
           ? `${fullPrompt}\n\nINCREMENTAL CHANGE REQUEST: This is an existing website. Keep its current design, content, and functionality unless the newest request explicitly changes them. Read the relevant existing files first; edit only the requested feature or section. Never replace the app with a simpler one-page implementation.`
           : fullPrompt;
+      // Also exists for checkpoint-resume runs, where the primary builder is
+      // intentionally skipped but later polish/verification still executes.
+      let usedRecoveryBuilder = false;
       if (!resumeBuilder) {
       await throwIfBuildStopped(job);
       await emit(chatId, 'building',
@@ -1087,7 +1288,10 @@ export default defineConfig({
           // switching to the recovery provider.
           // Do not let a single slow hosted generation block the whole build
           // for three minutes. A timed-out no-write pass falls back to Groq.
-          const timeoutMs = ['gemini', 'bedrock'].includes(activeProvider) ? 120_000 : undefined;
+          const timeoutMs = activeProvider === 'bedrock'
+            && options.model === 'deepseek.v3.2'
+            ? 180_000
+            : ['gemini', 'bedrock'].includes(activeProvider) ? 120_000 : undefined;
           // A retry against an overloaded free Gemini endpoint only makes the
           // UI appear stuck and can consume the remaining quota. Hand control
           // to Qwen immediately; other providers retain one bounded retry.
@@ -1154,6 +1358,7 @@ export default defineConfig({
             error: primaryError?.message ?? String(primaryError),
           });
           await emit(chatId, 'building', `The selected builder could not write project files; continuing with the ${recoveryProvider === 'nvidia' ? 'DeepSeek' : 'Qwen'} fallback…`);
+          usedRecoveryBuilder = true;
           buildResult = await runBuildPass({ provider: recoveryProvider }, 'BuilderFallback', true);
         }
         builderSummary = String(buildResult.output ?? '').trim();
@@ -1176,7 +1381,7 @@ export default defineConfig({
       // A second full model pass materially improves visual work but also
       // doubles first-build latency. Keep it opt-in; the primary builder
       // prompt still enforces the visual quality bar.
-      if (process.env.UI_POLISH_ENABLED === 'true' && !isReplan && !continueExistingProject && needsUiPolish(fullPrompt, planObj)) {
+      if (process.env.UI_POLISH_ENABLED === 'true' && !usedRecoveryBuilder && !isReplan && !continueExistingProject && needsUiPolish(fullPrompt, planObj)) {
         await throwIfBuildStopped(job);
         await emit(chatId, 'refining', 'Refining visual hierarchy and responsive details…');
         logger.startStage('UiPolishAgent');
@@ -1207,6 +1412,8 @@ export default defineConfig({
           logger.endStage('UiPolishAgent', { skipped: true });
           await emit(chatId, 'refining', 'Visual refinement unavailable; continuing with the generated UI.');
         }
+      } else if (usedRecoveryBuilder) {
+        await emit(chatId, 'refining', 'Visual refinement skipped because the compact recovery build was used.');
       }
       } else {
         await emit(chatId, 'building', 'Builder already completed; continuing from checkpoint.');
@@ -1226,13 +1433,18 @@ export default defineConfig({
         logger._log('warn', 'Relative import repair skipped', { error: error?.message ?? String(error) });
       }
 
-      // Make the first usable preview available before optional review agents run.
-      if (!previewUrl) {
-        await throwIfBuildStopped(job);
-        previewUrl = await startPreviewServer(sb, projectId, chatId, logger);
+      try {
+        if (await ensureRouterProvider(sb)) {
+          logger._log('info', 'Added missing React Router provider to generated app');
+          await emit(chatId, 'building', 'Repaired missing React Router provider.');
+        }
+      } catch (error) {
+        logger._log('warn', 'Router provider repair skipped', { error: error?.message ?? String(error) });
       }
-      await syncProjectFiles(sb, projectId, logger);
 
+      // Verify before exposing a preview. Starting Vite first used to show a
+      // red compiler overlay and forced the user to identify broken files
+      // manually, even though the pipeline can diagnose and repair them.
       // Fast path: successful builds do not need two extra LLM review agents.
       let fastCheckPassed = false;
       try {
@@ -1268,10 +1480,29 @@ export default defineConfig({
             diagnostic,
           };
 
+          const missingPackage = missingPackageFromDiagnostic(diagnostic);
+          if (missingPackage) {
+            await emit(chatId, 'building', `Installing missing dependency: ${missingPackage}…`);
+            try {
+              await toolMap.check_missing_packages.execute({ packages: [missingPackage] });
+              const dependencyCheck = JSON.parse(await toolMap.verify_project.execute({}));
+              if (dependencyCheck.success === true) {
+                fastCheckPassed = true;
+                checkOutput = `Build passed after installing ${missingPackage}.`;
+                await emit(chatId, 'checking', `Installed ${missingPackage}; fast internal verification passed.`);
+              }
+            } catch (error) {
+              logger._log('warn', 'Missing dependency install failed', {
+                package: missingPackage,
+                error: error?.message ?? String(error),
+              });
+            }
+          }
+
           // Syntax, import, and JSX errors have a precise compiler location.
           // Send that location directly to a fast repair builder instead of
           // waiting through both general-purpose review agents first.
-          if (/(?:unexpected token|syntaxerror|failed to resolve import|does not provide an export|is not defined)/i.test(diagnostic)) {
+          if (!fastCheckPassed && /(?:unexpected token|syntaxerror|unterminated|string constant|parse error|failed to resolve import|does not provide an export|is not defined)/i.test(diagnostic)) {
             await emit(chatId, 'building', 'Compiler error found; applying a targeted source repair…');
             try {
               await reportModel('builder', { provider: 'groq' }, 'building');
@@ -1281,9 +1512,9 @@ export default defineConfig({
                 tools: builderTools,
                 emit,
                 chatId,
-                modelOptions: { provider: 'groq' },
+                modelOptions: builderModelOptions,
                 incremental: true,
-                onUsage: billUsage('builder', { provider: 'groq' }),
+                onUsage: billUsage('builder', builderModelOptions),
               });
               if (repairResult.wroteFiles) {
                 const repairedRaw = await toolMap.verify_project.execute({});
@@ -1312,7 +1543,7 @@ export default defineConfig({
         await emit(chatId, 'checking', `Fast verification unavailable; continuing with review agents. ${err.message}`);
       }
 
-      if (!fastCheckPassed) {
+      if (!fastCheckPassed && REVIEW_AGENTS_ENABLED) {
       await throwIfBuildStopped(job);
       await emit(chatId, 'validating', 'Reviewing source files and fixing issues…');
       const resumeValidator = hasCheckpoint('validated') && !isReplan;
@@ -1335,7 +1566,6 @@ export default defineConfig({
         // code and preview that Builder already produced.
         await emit(chatId, 'validating', `Validator skipped: ${err.message}. Preview and generated code remain available.`);
       }
-
       await job.updateProgress({ percent: 72 + replanCount * 3, stage: 'validated' });
       await emit(chatId, 'validating', 'Validation complete.');
       } else {
@@ -1363,6 +1593,9 @@ export default defineConfig({
       }
 
       await job.updateProgress({ percent: 85 + replanCount * 3, stage: 'checked' });
+      }
+      else if (!fastCheckPassed) {
+        await emit(chatId, 'checking', 'Skipping quota-heavy AI review; using the production build result for targeted repair.');
       }
 
       // Do not rely on an agent's textual assessment to decide whether a
@@ -1438,7 +1671,9 @@ export default defineConfig({
 
     await job.updateProgress(92);
 
-    if (!previewUrl) try {
+    // Do not replace a working preview with a red Vite error overlay. A
+    // preview is published only after deterministic verification passes.
+    if (!previewUrl && !buildFailed) try {
     await sb.files.write('/app/vite.config.js',
 `import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -1488,8 +1723,11 @@ export default defineConfig({
 
     await emit(chatId, 'checking', 'Syncing files to database…');
     try {
+      await refreshProjectMemoryFile(sb, {
+        buildStatus: buildFailed ? 'needs repair' : 'verified',
+      });
       const allFiles = await collectSandboxFiles(sb, '/app/src');
-      const rootFiles = ['vite.config.js', 'index.html', 'package.json', 'tailwind.config.js', 'postcss.config.js'];
+      const rootFiles = ['vite.config.js', 'index.html', 'package.json', 'tailwind.config.js', 'postcss.config.js', '.seezer/memory.md'];
       for (const file of rootFiles) {
         try {
           const content = await sb.files.read(`/app/${file}`);

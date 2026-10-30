@@ -65,7 +65,9 @@ const OPENROUTER_APP_NAME =
 
 const NVIDIA_NIM_BASE_URL = process.env.NVIDIA_NIM_BASE_URL || "https://integrate.api.nvidia.com/v1";
 const BEDROCK_REGION = process.env.BEDROCK_REGION || "us-east-1";
-const BEDROCK_BASE_URL = process.env.BEDROCK_BASE_URL || `https://bedrock-mantle.${BEDROCK_REGION}.api.aws/v1`;
+// Mantle's OpenAI-compatible models (such as Grok 4.3) require this exact
+// API prefix. The native Bedrock Converse client below does not use it.
+const BEDROCK_BASE_URL = process.env.BEDROCK_BASE_URL || `https://bedrock-mantle.${BEDROCK_REGION}.api.aws/openai/v1`;
 
 /* ---------------- TIMEOUTS ---------------- */
 
@@ -187,6 +189,22 @@ function createNvidiaModel(model, temperature = 0.2, maxTokens = 2048, timeout =
 function createBedrockModel(model, temperature = 0.2, maxTokens = 2048, timeout = REQUEST_TIMEOUT_MS) {
   if (!BEDROCK_API_KEY) {
     throw new Error("BEDROCK_API_KEY (or AWS_BEARER_TOKEN_BEDROCK) missing");
+  }
+  // Grok 4.3 is hosted on Bedrock Mantle but supports the OpenAI-compatible
+  // Chat Completions API. DeepSeek V3.2 must use native Converse here; the
+  // configured /openai/v1 Mantle route rejects it even though Workbench can
+  // invoke the model through Bedrock Runtime.
+  if (model === 'xai.grok-4.3') {
+    return new ChatOpenAI({
+      model,
+      apiKey: BEDROCK_API_KEY,
+      openAIApiKey: BEDROCK_API_KEY,
+      temperature,
+      maxTokens,
+      timeout,
+      maxRetries: 0,
+      configuration: { baseURL: BEDROCK_BASE_URL },
+    });
   }
   // Native Bedrock Converse avoids the OpenAI-compatible Mantle translation
   // layer, which was producing slow or malformed tool-call payloads for Qwen.

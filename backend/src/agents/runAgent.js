@@ -55,7 +55,28 @@ function compactMessages(messages) {
 }
 
 function normalizeToolCalls(message) {
-  if (message?.tool_calls?.length) return message;
+  const normalizeNestedArgs = (args) => {
+    if (!args || typeof args !== 'object') return args;
+    // Grok 4.3 occasionally serializes an array-valued function parameter a
+    // second time, e.g. { files: "[{...}]" }. LangChain then rejects it
+    // before the sandbox tool gets a chance to run.
+    for (const key of ['files', 'edits', 'paths']) {
+      if (typeof args[key] !== 'string') continue;
+      try {
+        const parsed = JSON.parse(args[key]);
+        args[key] = Array.isArray(parsed) ? parsed : parsed?.[key] ?? args[key];
+      } catch { /* keep original so the tool reports a normal validation error */ }
+    }
+    return args;
+  };
+
+  if (message?.tool_calls?.length) {
+    message.tool_calls = message.tool_calls.map((call) => ({
+      ...call,
+      args: normalizeNestedArgs(call.args),
+    }));
+    return message;
+  }
 
   // Some older LangChain provider adapters leave OpenAI-compatible tool
   // calls under additional_kwargs instead of setting AIMessage.tool_calls.
@@ -71,7 +92,7 @@ function normalizeToolCalls(message) {
     }
     return {
       name: fn?.name ?? call?.name ?? "",
-      args,
+      args: normalizeNestedArgs(args),
       id: call?.id ?? `tool_call_${Date.now()}_${index}`,
       type: "tool_call",
     };
@@ -105,6 +126,7 @@ export async function runReActAgent({
   modelOptions = {},
   toolChoice,
   stopAfterTool = false,
+  abortOnMalformedWrite = false,
   signal,
   onUsage = async () => {}
 }) {
@@ -113,11 +135,13 @@ export async function runReActAgent({
   console.log(
   `[MODEL DEBUG] Agent=${agentName} | ModelType=${modelType}`
 );
-  // Bedrock Converse handles tools natively but model support for forced
-  // tool-choice is model-specific. The Builder prompt still requires the
-  // write tool; avoid passing an OpenAI-only force directive to Bedrock.
+  // Native Bedrock Converse does not share OpenAI's forced-tool format.
+  // Grok 4.3 alone uses Bedrock Mantle's OpenAI-compatible Chat Completions
+  // path, so it supports forced tools.
+  const usesNativeBedrockConverse = modelOptions.provider === 'bedrock'
+    && modelOptions.model !== 'xai.grok-4.3';
   const modelWithTools = tools.length > 0
-    ? model.bindTools(tools, toolChoice && modelOptions.provider !== 'bedrock'
+    ? model.bindTools(tools, toolChoice && !usesNativeBedrockConverse
       ? { tool_choice: toolChoice }
       : undefined)
     : model;
@@ -133,6 +157,23 @@ export async function runReActAgent({
   if (toolNode) {
     graph
       .addNode("tools", async (state) => {
+        // Some native Bedrock Qwen responses name write_multiple_files but
+        // omit its required `files` argument. Passing that invalid request
+        // back to the model can leave the next Converse turn hanging until
+        // the whole builder timeout. Fail this build pass immediately so the
+        // worker can use its bounded recovery writer instead.
+        if (abortOnMalformedWrite) {
+          const lastRequest = [...state.messages].reverse().find(
+            (message) => Array.isArray(message?.tool_calls) && message.tool_calls.length > 0
+          );
+          const malformedWrite = lastRequest?.tool_calls?.find((call) =>
+            call?.name === 'write_multiple_files'
+            && (!Array.isArray(call?.args?.files) || call.args.files.length === 0)
+          );
+          if (malformedWrite) {
+            throw new Error('Builder returned write_multiple_files without a files array.');
+          }
+        }
         return await toolNode.invoke(state);
       })
       .addEdge(START, "agent")
@@ -215,6 +256,13 @@ export async function runReActAgent({
         if (last.tool_calls?.length) {
           toolCallCount += last.tool_calls.length;
           for (const t of last.tool_calls) {
+            const args = t.args && typeof t.args === "object" ? t.args : {};
+            const paths = [
+              args.path,
+              ...(Array.isArray(args.files) ? args.files.map((file) => file?.path) : []),
+              ...(Array.isArray(args.edits) ? args.edits.map((edit) => edit?.path) : []),
+            ].filter((path) => typeof path === "string").slice(0, 12);
+            console.log(`[MODEL DEBUG] tool_call name=${t.name} argKeys=${Object.keys(args).join(',') || 'none'} paths=${paths.join(',') || 'none'}`);
             await emit(chatId, agentName, `🔧 Calling tool: ${t.name}`);
           }
         }
@@ -222,6 +270,9 @@ export async function runReActAgent({
 
  
       if (type === "tool" || type === "ToolMessage") {
+        if (last.status === "error") {
+          console.warn(`[MODEL DEBUG] tool_validation_error=${String(last.content ?? "").slice(0, 500)}`);
+        }
         await emit(chatId, agentName, "✅ Tool completed");
       }
     }

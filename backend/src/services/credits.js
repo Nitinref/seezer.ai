@@ -12,6 +12,16 @@ const RATE_CARD = {
 // markup makes substantial generation runs meaningfully consume credits.
 const CREDIT_RATE_MULTIPLIER = Number(process.env.CREDIT_RATE_MULTIPLIER || 8);
 const MINIMUM_BUILD_CREDIT_USD = Number(process.env.MINIMUM_BUILD_CREDIT_USD || 0.05);
+const ADMIN_EMAILS = new Set(
+  String(process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+export function isUnlimitedAdmin(user) {
+  return Boolean(user?.email) && ADMIN_EMAILS.has(String(user.email).toLowerCase());
+}
 
 function tokensFrom(usage = {}) {
   const input = Number(usage.input_tokens ?? usage.inputTokens ?? usage.prompt_tokens ?? usage.promptTokens ?? usage.promptTokenCount ?? usage.prompt_token_count ?? 0);
@@ -29,7 +39,9 @@ export function calculateUsageCost(usage, provider = 'openrouter') {
 }
 
 export async function getCreditBalance(userId) {
-  return prisma.user.findUnique({ where: { id: userId }, select: { creditBalanceUsd: true } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, creditBalanceUsd: true } });
+  if (!user) return null;
+  return { ...user, unlimited: isUnlimitedAdmin(user) };
 }
 
 export async function chargeUsage({ userId, jobId, agent, provider, model, usage }) {
@@ -38,8 +50,9 @@ export async function chargeUsage({ userId, jobId, agent, provider, model, usage
   if (requestedCost <= 0) return { chargedUsd: 0, balanceUsd: null, exhausted: false };
 
   return prisma.$transaction(async (tx) => {
-    const user = await tx.user.findUnique({ where: { id: userId }, select: { creditBalanceUsd: true } });
+    const user = await tx.user.findUnique({ where: { id: userId }, select: { email: true, creditBalanceUsd: true } });
     if (!user) throw new Error('User not found while charging credits');
+    if (isUnlimitedAdmin(user)) return { chargedUsd: 0, balanceUsd: null, exhausted: false, unlimited: true };
     const balance = Number(user.creditBalanceUsd);
     const chargedUsd = Math.min(balance, requestedCost);
     const nextBalance = Math.max(0, Number((balance - chargedUsd).toFixed(6)));
@@ -71,8 +84,9 @@ export async function chargeUsageBatch({ userId, jobId, usages = [] }) {
   if (!rows.length) return { chargedUsd: 0, balanceUsd: null, exhausted: false, entries: 0 };
 
   return prisma.$transaction(async (tx) => {
-    const user = await tx.user.findUnique({ where: { id: userId }, select: { creditBalanceUsd: true } });
+    const user = await tx.user.findUnique({ where: { id: userId }, select: { email: true, creditBalanceUsd: true } });
     if (!user) throw new Error('User not found while charging credits');
+    if (isUnlimitedAdmin(user)) return { chargedUsd: 0, balanceUsd: null, exhausted: false, entries: 0, unlimited: true };
 
     let remaining = Number(user.creditBalanceUsd);
     const ledgerRows = rows.map((row) => {
@@ -103,10 +117,11 @@ export async function chargeUsageBatch({ userId, jobId, usages = [] }) {
 export async function enforceMinimumBuildCharge({ userId, jobId, provider = 'openrouter' }) {
   return prisma.$transaction(async (tx) => {
     const [user, usage] = await Promise.all([
-      tx.user.findUnique({ where: { id: userId }, select: { creditBalanceUsd: true } }),
+      tx.user.findUnique({ where: { id: userId }, select: { email: true, creditBalanceUsd: true } }),
       tx.creditTransaction.aggregate({ where: { jobId: String(jobId) }, _sum: { amountUsd: true } }),
     ]);
     if (!user) throw new Error('User not found while applying build minimum');
+    if (isUnlimitedAdmin(user)) return { chargedUsd: 0, balanceUsd: null, applied: false, unlimited: true };
 
     const alreadyCharged = Math.abs(Number(usage._sum.amountUsd ?? 0));
     const requestedTopUp = Math.max(0, Number((MINIMUM_BUILD_CREDIT_USD - alreadyCharged).toFixed(6)));

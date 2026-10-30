@@ -16,7 +16,10 @@ export async function runValidatorAgent({ tools, timeoutMs = VALIDATOR_TIMEOUT_M
             emit,
             chatId,
             temperature: 0.1,
-            maxTokens: 1024,
+            // Groq's on-demand Qwen tier allows 1,000 output tokens/minute.
+            // Tool schemas add overhead to the provider's requested output
+            // budget, so 1,024 can be rejected before validation starts.
+            maxTokens: 512,
             maxSteps: 5,
             modelType: 'validator',
             agentName:'validator', // haiku

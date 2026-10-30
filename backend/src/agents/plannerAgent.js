@@ -24,12 +24,15 @@ export async function runPlannerAgent({
   modelOptions = {},
   onUsage = async () => {}
 }){
-  // A plan with files, steps, and descriptions is often cut off at 1024
-  // tokens, which then falls back to a generic template. Leave room for the
-  // planner's real JSON response.
+  // Groq's on-demand free tier enforces a 1K output-token-per-minute cap.
+  // Keep its plan compact enough to succeed; paid providers retain the
+  // larger planning budget for detailed JSON.
   // A small amount of variation avoids repeatedly producing the same generic
   // component plan while remaining structured enough for JSON output.
-  const model = makeModel('planner', 0.25, 2048, modelOptions);
+  const maxTokens = (modelOptions.provider ?? process.env.PLANNER_PROVIDER) === 'groq'
+    ? 900
+    : 2048;
+  const model = makeModel('planner', 0.25, maxTokens, modelOptions);
   const controller = new AbortController();
   let timeout;
   const deadline = new Promise((_, reject) => {

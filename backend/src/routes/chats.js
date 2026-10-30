@@ -3,6 +3,7 @@ import prisma from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { enqueueBuildJob, getJobStatus, cancelBuildJob } from '../services/pipeLineService.js';
 import { buildQueue } from '../queues/buildQueue.js';
+import { isUnlimitedAdmin } from '../services/credits.js';
 
 const router = Router();
 
@@ -22,9 +23,9 @@ router.post('/', authenticate, async (req, res) => {
 
     const account = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { creditBalanceUsd: true },
+      select: { email: true, creditBalanceUsd: true },
     });
-    if (!account || Number(account.creditBalanceUsd) <= 0) {
+    if (!account || (!isUnlimitedAdmin(account) && Number(account.creditBalanceUsd) <= 0)) {
       return res.status(402).json({ error: 'Your $2 AI credit has been used. Add credits to continue.' });
     }
 

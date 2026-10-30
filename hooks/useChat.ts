@@ -18,7 +18,7 @@ export function useChat(chatId: string | null) {
   const qc = useQueryClient();
   const token = useAuthStore((s) => s.token);
   const {
-    setIsBuilding, setBuildProgress, addPipelineEvent,
+    setIsBuilding, setBuildProgress, addPipelineEvent, clearPipelineEvents,
     setPipelineEvents, setPreviewUrl, setActiveChatId, setActiveJobId,
     activeJobId, activeProject, isBuilding,
   } = useAppStore();
@@ -159,6 +159,12 @@ export function useChat(chatId: string | null) {
   const sendMutation = useMutation({
     mutationFn: (message: string) =>
       chatApi.send(activeProject!.id, message),
+    // The terminal is a live run view, not the complete chat history. Without
+    // this reset, a follow-up displayed the first build's planner card below
+    // its own activity and made it look as if planning had run again.
+    onMutate: () => {
+      clearPipelineEvents();
+    },
     onSuccess: async (data) => {
       activeJobIdRef.current = data.jobId;
       setActiveJobId(data.jobId);
