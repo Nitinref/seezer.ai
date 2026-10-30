@@ -628,7 +628,14 @@ async function syncProjectFiles(sb, projectId, logger) {
 async function processBuildJob(job) {
   const { chatId, projectId, userId: queuedUserId, userMessage, previousMessages, provider, model } = job.data;
   activeBuildJobsByChat.set(chatId, String(job.id));
-  const modelOptions = ['openrouter', 'gemini', 'nvidia', 'bedrock'].includes(provider) ? { provider, model } : {};
+  // A model picked in the composer is a Builder choice only. Planning,
+  // validation and checking retain their dedicated provider configuration.
+  const builderRequestOptions = ['openrouter', 'gemini', 'nvidia', 'bedrock', 'groq'].includes(provider)
+    ? { provider, model }
+    : {};
+  const plannerModelOptions = {};
+  const validatorModelOptions = {};
+  const checkerModelOptions = {};
   const previousProgress = job.progress && typeof job.progress === 'object' ? job.progress : {};
   const resumeStage = previousProgress.stage || null;
   const isRetryResume = job.attemptsMade > 0 && Boolean(resumeStage);
@@ -687,10 +694,12 @@ async function processBuildJob(job) {
     // try/catch; otherwise BullMQ retries the same cancellation as a failure.
     await throwIfBuildStopped(job);
     await emit(chatId, 'start', 'Build job received — pipeline starting…');
-    const initialModels = ['planner', 'builder', 'validator', 'checker'].map((agent) => ({
-      agent,
-      ...resolveModel(agent, modelOptions),
-    }));
+    const initialModels = [
+      ['planner', plannerModelOptions],
+      ['builder', builderRequestOptions],
+      ['validator', validatorModelOptions],
+      ['checker', checkerModelOptions],
+    ].map(([agent, options]) => ({ agent, ...resolveModel(agent, options) }));
     const modelConfiguration = {
       level: 'info', event: 'build_model_configuration', jobId: String(job.id), models: initialModels, ts: new Date().toISOString(),
     };
@@ -702,8 +711,8 @@ async function processBuildJob(job) {
       msg: userMessage.slice(0, 80),
       requestedProvider: provider ?? 'default',
       requestedModel: model ?? 'default',
-      effectivePlannerProvider: modelOptions.provider ?? AGENT_PROVIDERS.planner,
-      effectiveBuilderProvider: modelOptions.provider ?? AGENT_PROVIDERS.builder,
+      effectivePlannerProvider: AGENT_PROVIDERS.planner,
+      effectiveBuilderProvider: builderRequestOptions.provider ?? AGENT_PROVIDERS.builder,
     });
 
     if (job.attemptsMade > 0 && !isRetryResume) await sleep(15_000);
@@ -817,7 +826,9 @@ export default defineConfig({
       .map((m) => `${m.role.toUpperCase()}: ${m.content.slice(0, 200)}`)
       .join('\n');
 
-    const hasPriorProjectContext = previousMessages.length > 0 || Boolean(savedPlan) || projectFilePaths.length > 0;
+    // A prior user message alone does not mean a project exists. A first
+    // build can fail before any plan or source file was written.
+    const hasPriorProjectContext = Boolean(savedPlan) || projectFilePaths.length > 0;
     const previousPlanBrief = savedPlan ? JSON.stringify({
       summary: savedPlan.summary,
       approach: savedPlan.approach,
@@ -950,13 +961,13 @@ export default defineConfig({
 
       let planOutput;
       try {
-        await reportModel('planner', modelOptions, 'planning');
+        await reportModel('planner', plannerModelOptions, 'planning');
         planOutput = await withRetry(() =>runPlannerAgent({
   prompt: planPrompt,
   emit,
   chatId,
-  modelOptions,
-  onUsage: billUsage('planner', modelOptions)
+  modelOptions: plannerModelOptions,
+  onUsage: billUsage('planner', plannerModelOptions)
 }), 1, 'PlannerAgent');
         await throwIfBuildStopped(job);
 
@@ -968,8 +979,8 @@ export default defineConfig({
             prompt: `${planPrompt}\n\nIMPORTANT: Return a non-empty raw JSON object now. Do not explain. Include at least summary, approach, homeComponent, files, newPages, packages, and steps.`,
             emit,
             chatId,
-            modelOptions,
-            onUsage: billUsage('planner', modelOptions),
+            modelOptions: plannerModelOptions,
+            onUsage: billUsage('planner', plannerModelOptions),
           });
         }
         logger.endStage('PlannerAgent');
@@ -980,7 +991,7 @@ export default defineConfig({
         // a recovery path, then fall through to the local fallback plan.
         logger._log('warn', 'PlannerAgent failed', { error: err?.message ?? String(err), provider });
 
-        const activePlannerProvider = modelOptions.provider ?? AGENT_PROVIDERS.planner;
+        const activePlannerProvider = AGENT_PROVIDERS.planner;
         if (['openrouter', 'gemini', 'bedrock'].includes(activePlannerProvider)) {
           try {
             await emit(chatId, 'planning', 'Planner is taking too long; retrying with a faster model…');
@@ -1049,8 +1060,8 @@ export default defineConfig({
       // Job-level provider selection is optional. Always pass the resolved
       // builder provider through to BuilderAgent so provider-specific modes
       // (Bedrock's one-turn write path) also apply to default builds.
-      const builderModelOptions = modelOptions.provider
-        ? modelOptions
+      const builderModelOptions = builderRequestOptions.provider
+        ? builderRequestOptions
         : { provider: AGENT_PROVIDERS.builder };
       const builderPrompt = isReplan && lastError?.diagnostic
         ? `${fullPrompt}\n\nTARGETED BUILD REPAIR:\nThe previous build failed with the diagnostic below. Inspect the files named by this error and fix this specific failure. Preserve the existing implementation; do not redesign or replace unrelated parts. After the fix, ensure all affected imports, exports, and references are consistent.\n\n${lastError.diagnostic}`
@@ -1093,6 +1104,7 @@ export default defineConfig({
               compactFallback,
               forceWriteTool: compactFallback,
               incremental: continueExistingProject || resumeFailedBuild || isReplan,
+              initialBuild: !continueExistingProject && !resumeFailedBuild && !isReplan,
               ...(timeoutMs ? { timeoutMs } : {}),
             }),
             retries, label
@@ -1308,9 +1320,9 @@ export default defineConfig({
       logger.startStage('CodeValidatorAgent');
 
       try {
-        await reportModel('validator', modelOptions, 'validating');
+        await reportModel('validator', validatorModelOptions, 'validating');
         await withRetry(
-          () => runValidatorAgent({ tools: validatorTools ,emit,chatId,modelOptions, onUsage: billUsage('validator')}),
+          () => runValidatorAgent({ tools: validatorTools ,emit,chatId,modelOptions: validatorModelOptions, onUsage: billUsage('validator', validatorModelOptions)}),
           1, 'CodeValidatorAgent'
         );
         await throwIfBuildStopped(job);
@@ -1335,9 +1347,9 @@ export default defineConfig({
       logger.startStage('AppCheckerAgent');
 
       try {
-        await reportModel('checker', modelOptions, 'checking');
+        await reportModel('checker', checkerModelOptions, 'checking');
         checkOutput = await withRetry(
-          () => runCheckerAgent({ tools: checkerTools,emit,chatId,modelOptions, onUsage: billUsage('checker') }),
+          () => runCheckerAgent({ tools: checkerTools,emit,chatId,modelOptions: checkerModelOptions, onUsage: billUsage('checker', checkerModelOptions) }),
           1, 'AppCheckerAgent'
         );
         await throwIfBuildStopped(job);
@@ -1513,7 +1525,7 @@ export default defineConfig({
       const minimumCharge = await enforceMinimumBuildCharge({
         userId: chatOwner.userId,
         jobId: job.id,
-        provider: modelOptions.provider ?? AGENT_PROVIDERS.builder,
+        provider: builderRequestOptions.provider ?? AGENT_PROVIDERS.builder,
       });
       if (minimumCharge.applied) {
         logger._log('info', 'Build minimum charged', { chargedUsd: minimumCharge.chargedUsd, balanceUsd: minimumCharge.balanceUsd });

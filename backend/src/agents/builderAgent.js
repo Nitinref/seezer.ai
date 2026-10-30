@@ -62,6 +62,7 @@ export async function runBuilderAgent({
   compactFallback = false,
   forceWriteTool = false,
   incremental = false,
+  initialBuild = false,
   onUsage,
 }) {
   let readCalls = 0;
@@ -70,6 +71,7 @@ export async function runBuilderAgent({
   // Bedrock Qwen has high latency between ReAct turns. For normal builds,
   // give it only the one atomic write path so it cannot spend a full model
   // request reading and then another one deciding to write.
+  const initialWritePath = initialBuild && !polish && !incremental;
   const bedrockFastPath = modelOptions.provider === 'bedrock' && !polish && !incremental;
   // Never let an agent continue consuming requests after the UI has received
   // a timeout. The old Promise.race left the LangGraph loop alive in the
@@ -82,7 +84,7 @@ export async function runBuilderAgent({
   const builderTools = tools
     .filter((tool) =>
       !['get_context', 'list_directory', 'save_context'].includes(tool.name) &&
-      !(bedrockFastPath && READ_TOOLS.has(tool.name))
+      !((bedrockFastPath || initialWritePath) && READ_TOOLS.has(tool.name))
     )
     .map((tool) => new Proxy(tool, {
       get(target, property) {
@@ -129,7 +131,7 @@ ${compactFallback
 ${incremental
   ? '\nINCREMENTAL UPDATE MODE: This is an existing project. First read the relevant files, then change only what the newest request requires. Preserve the existing visual design, working interactions, routes, and unrelated components. Do not replace the application with a new minimal page or scaffold.'
   : ''}
-${bedrockFastPath
+${(bedrockFastPath || initialWritePath)
   ? '\nFAST BEDROCK MODE: Do not inspect files. Immediately make exactly one write_multiple_files call containing every complete file required by the validated plan. Then stop. Do not call any other tool or provide a preamble.'
   : ''}
 
@@ -172,7 +174,7 @@ ${userMessage}`;
       // Bedrock Qwen is fast when it sends the whole project as one atomic
       // write, but can otherwise create files one at a time. Pin the tool so
       // new builds need one request and one tool execution, not a slow chain.
-      toolChoice: repair || forceWriteTool || (modelOptions.provider === 'bedrock' && !incremental)
+      toolChoice: repair || forceWriteTool || initialWritePath || (modelOptions.provider === 'bedrock' && !incremental)
         ? 'write_multiple_files'
         : undefined,
       // Qwen Coder writes the full app atomically but can then leave a slow
@@ -183,7 +185,7 @@ ${userMessage}`;
         ? [...WRITE_TOOLS]
         : compactFallback && forceWriteTool
         ? true
-        : modelOptions.provider === 'bedrock' && !incremental
+        : (modelOptions.provider === 'bedrock' || initialWritePath) && !incremental
           ? [...WRITE_TOOLS]
           : false,
       // The worker already emits the real tool results. Suppress LangGraph's
